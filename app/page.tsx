@@ -9,16 +9,17 @@ import {
   LogOut,
   Camera,
   Star,
+  StarHalf,
   Sparkles,
   Clipboard,
   Check,
-  Send,
   Loader2,
   Trash2,
   CheckCircle2,
   PlusCircle,
   FileText,
-  Clock
+  Clock,
+  X
 } from 'lucide-react';
 
 interface Review {
@@ -32,6 +33,48 @@ interface Review {
   created_at: string;
 }
 
+// Helper function to parse title and comment from the generated review text
+const parseReview = (text: string | null): { title: string; comment: string } => {
+  if (!text) return { title: '', comment: '' };
+
+  const cleanText = text.replace(/\*\*/g, '').trim();
+
+  // Regex to match "タイトル：..." or "Title: ..."
+  const titleMatch = cleanText.match(/(?:タイトル|Title)\s*[:：]\s*([^\n]+)/i);
+  // Regex to match "コメント：..." or "Comment: ..."
+  const commentMatch = cleanText.match(/(?:コメント|本文|Comment|Body)\s*[:：]\s*([\s\S]+)/i);
+
+  let title = titleMatch ? titleMatch[1].trim() : '';
+  let comment = commentMatch ? commentMatch[1].trim() : '';
+
+  // Fallback if parsing fails
+  if (!title && !comment) {
+    const lines = cleanText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length >= 2) {
+      // Look for lines that start with Title/Comment labels but failed regex, or just take first line as title
+      const firstLine = lines[0];
+      const isTitleLine = firstLine.startsWith('タイトル：') || firstLine.startsWith('タイトル:') || firstLine.startsWith('Title:');
+      title = isTitleLine ? firstLine.replace(/^(タイトル：|タイトル:|Title:\s*)/i, '').trim() : firstLine;
+      
+      const restLines = lines.slice(1);
+      const firstRestLine = restLines[0];
+      const isCommentLine = firstRestLine.startsWith('コメント：') || firstRestLine.startsWith('コメント:') || firstRestLine.startsWith('Comment:');
+      
+      let commentText = restLines.join('\n');
+      if (isCommentLine) {
+        commentText = restLines.map((line, idx) => 
+          idx === 0 ? line.replace(/^(コメント：|コメント:|Comment:\s*)/i, '') : line
+        ).join('\n');
+      }
+      comment = commentText.trim();
+    } else {
+      comment = cleanText;
+    }
+  }
+
+  return { title, comment };
+};
+
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -41,8 +84,8 @@ export default function DashboardPage() {
   const [shopName, setShopName] = useState('');
   const [rating, setRating] = useState(3.0);
   const [rawMemo, setRawMemo] = useState('');
-  const [photo, setPhoto] = useState<File | null>(null);
-  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [photosBase64, setPhotosBase64] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -97,58 +140,77 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
-  // Client-side image resizing and base64 encoding
+  // Client-side image resizing and base64 encoding (multiple files)
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    setPhoto(file);
     setFormError(null);
+    const newFiles = Array.from(files);
 
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1200;
-        const MAX_HEIGHT = 1200;
-        let width = img.width;
-        let height = img.height;
+    if (photos.length + newFiles.length > 3) {
+      setFormError('画像は最大3枚までアップロードできます');
+      return;
+    }
 
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height = Math.round((height * MAX_WIDTH) / width);
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width = Math.round((width * MAX_HEIGHT) / height);
-            height = MAX_HEIGHT;
-          }
-        }
+    const resizePromises = newFiles.map(file => {
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+          const img = new Image();
+          img.src = event.target?.result as string;
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 1200;
+            const MAX_HEIGHT = 1200;
+            let width = img.width;
+            let height = img.height;
 
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          setFormError('画像のリサイズに失敗しました（Canvasコンテキスト取得エラー）');
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        
-        // Compress JPEG to 85% quality
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        setPhotoBase64(dataUrl);
-      };
-      img.onerror = () => {
-        setFormError('画像の読み込みに失敗しました');
-      };
-    };
-    reader.onerror = () => {
-      setFormError('ファイルの読み込みに失敗しました');
-    };
+            if (width > height) {
+              if (width > MAX_WIDTH) {
+                height = Math.round((height * MAX_WIDTH) / width);
+                width = MAX_WIDTH;
+              }
+            } else {
+              if (height > MAX_HEIGHT) {
+                width = Math.round((width * MAX_HEIGHT) / height);
+                height = MAX_HEIGHT;
+              }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              reject(new Error('Canvasコンテキストの取得に失敗しました'));
+              return;
+            }
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            resolve(dataUrl);
+          };
+          img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
+        };
+        reader.onerror = () => reject(new Error('ファイルの読み込みに失敗しました'));
+      });
+    });
+
+    try {
+      const base64s = await Promise.all(resizePromises);
+      setPhotos(prev => [...prev, ...newFiles]);
+      setPhotosBase64(prev => [...prev, ...base64s]);
+    } catch (err: any) {
+      setFormError(err.message || '画像の処理中にエラーが発生しました');
+    }
+
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setPhotos(prev => prev.filter((_, i) => i !== index));
+    setPhotosBase64(prev => prev.filter((_, i) => i !== index));
   };
 
   // Submit and trigger API route
@@ -158,7 +220,7 @@ export default function DashboardPage() {
       setFormError('店舗名を入力してください');
       return;
     }
-    if (!photoBase64) {
+    if (photosBase64.length === 0) {
       setFormError('写真をアップロードしてください');
       return;
     }
@@ -187,12 +249,15 @@ export default function DashboardPage() {
       // Refresh list immediately so user sees 'processing' state
       setReviews(prev => [insertedReview, ...prev]);
 
+      // Copy local variables to send in fetch
+      const payloadImages = [...photosBase64];
+
       // Clear input fields during processing
       setShopName('');
       setRating(3.0);
       setRawMemo('');
-      setPhoto(null);
-      setPhotoBase64(null);
+      setPhotos([]);
+      setPhotosBase64([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       // 2. Fetch session and tokens
@@ -211,14 +276,14 @@ export default function DashboardPage() {
           shop_name: insertedReview.shop_name,
           rating: insertedReview.rating,
           raw_memo: insertedReview.raw_memo,
-          image_base64: photoBase64,
+          images_base64: payloadImages,
         }),
       });
 
       const result = await response.json();
 
       if (!response.ok) {
-        // If server failed, update status to failed in state/DB or just throw
+        // If server failed, clean up the processing record in DB
         await supabase
           .from('tabelog_reviews')
           .delete()
@@ -231,7 +296,6 @@ export default function DashboardPage() {
 
     } catch (err: any) {
       setFormError(err.message || '予期せぬエラーが発生しました');
-      // Re-fetch list to sync states
       if (user) fetchReviews(user.id);
     } finally {
       setGenerating(false);
@@ -248,7 +312,6 @@ export default function DashboardPage() {
 
       if (error) throw error;
 
-      // Update state locally
       setReviews(prev =>
         prev.map(r => (r.id === reviewId ? { ...r, status: 'posted' } : r))
       );
@@ -276,11 +339,26 @@ export default function DashboardPage() {
   };
 
   // Copy to clipboard helper
-  const handleCopyToClipboard = (text: string, reviewId: string) => {
+  const handleCopyToClipboard = (text: string, copyKey: string) => {
     navigator.clipboard.writeText(text).then(() => {
-      setCopiedId(reviewId);
+      setCopiedId(copyKey);
       setTimeout(() => setCopiedId(null), 2000);
     });
+  };
+
+  // Helper to render fractional stars (0.2 step)
+  const renderStars = (val: number, size: number = 28) => {
+    const stars = [];
+    for (let i = 1; i <= 5; i++) {
+      if (val >= i) {
+        stars.push(<Star key={i} size={size} fill="var(--secondary)" color="var(--secondary)" className={styles.starIcon} />);
+      } else if (val >= i - 0.7) {
+        stars.push(<StarHalf key={i} size={size} fill="var(--secondary)" color="var(--secondary)" className={styles.starIcon} />);
+      } else {
+        stars.push(<Star key={i} size={size} fill="none" color="var(--text-muted)" className={styles.starIcon} />);
+      }
+    }
+    return stars;
   };
 
   // Filter reviews
@@ -352,55 +430,64 @@ export default function DashboardPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">評価（5段階）<span className={styles.required}>*</span></label>
+                <label className="form-label">評価（5段階・0.2刻み）<span className={styles.required}>*</span></label>
                 <div className={styles.starRatingContainer}>
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <button
-                      key={star}
-                      type="button"
-                      className={styles.starButton}
-                      onClick={() => setRating(star)}
-                      disabled={generating}
-                    >
-                      <Star
-                        size={28}
-                        fill={star <= rating ? 'var(--secondary)' : 'none'}
-                        color={star <= rating ? 'var(--secondary)' : 'var(--text-muted)'}
-                        className={styles.starIcon}
-                      />
-                    </button>
-                  ))}
+                  <div className={styles.starsWrapper}>
+                    {renderStars(rating)}
+                  </div>
+                  <input
+                    type="range"
+                    min="1.0"
+                    max="5.0"
+                    step="0.2"
+                    className={styles.ratingSlider}
+                    value={rating}
+                    onChange={(e) => setRating(parseFloat(e.target.value))}
+                    disabled={generating}
+                  />
                   <span className={styles.ratingValue}>{rating.toFixed(1)}</span>
                 </div>
               </div>
 
               <div className="form-group">
-                <label className="form-label">写真 <span className={styles.required}>*</span></label>
-                <div className={styles.photoUploadArea}>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    ref={fileInputRef}
-                    className={styles.fileInput}
-                    onChange={handlePhotoChange}
-                    id="photo-upload-input"
-                    disabled={generating}
-                  />
-                  <label htmlFor="photo-upload-input" className={styles.photoUploadLabel}>
-                    {photoBase64 ? (
-                      <div className={styles.photoPreviewWrapper}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={photoBase64} alt="Upload preview" className={styles.photoPreview} />
-                        <span className={styles.photoChangeHint}>写真を変更</span>
-                      </div>
-                    ) : (
-                      <div className={styles.photoUploadPlaceholder}>
-                        <Camera size={36} className={styles.uploadIcon} />
-                        <span className={styles.uploadText}>料理・店舗の写真を撮影 / 選択</span>
-                        <span className={styles.uploadSubtext}>※ブラウザ側で1200pxに自動リサイズされます</span>
-                      </div>
-                    )}
-                  </label>
+                <label className="form-label">写真（最大3枚）<span className={styles.required}>*</span></label>
+                <div className={styles.photoUploadGroup}>
+                  {photosBase64.map((base64, index) => (
+                    <div key={index} className={styles.photoPreviewCard}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={base64} alt={`Upload preview ${index + 1}`} className={styles.photoPreviewMini} />
+                      <button
+                        type="button"
+                        className={styles.removePhotoBtn}
+                        onClick={() => handleRemovePhoto(index)}
+                        disabled={generating}
+                        title="画像を削除"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  
+                  {photosBase64.length < 3 && (
+                    <div className={styles.photoUploadArea}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        ref={fileInputRef}
+                        className={styles.fileInput}
+                        onChange={handlePhotoChange}
+                        id="photo-upload-input"
+                        disabled={generating}
+                      />
+                      <label htmlFor="photo-upload-input" className={styles.photoUploadLabel}>
+                        <div className={styles.photoUploadPlaceholder}>
+                          <Camera size={26} className={styles.uploadIcon} />
+                          <span className={styles.uploadText}>写真を追加 ({photosBase64.length}/3)</span>
+                        </div>
+                      </label>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -425,7 +512,7 @@ export default function DashboardPage() {
                 type="submit"
                 className="btn btn-primary"
                 style={{ width: '100%', marginTop: '0.5rem' }}
-                disabled={generating || !shopName || !photoBase64}
+                disabled={generating || !shopName || photosBase64.length === 0}
               >
                 {generating ? (
                   <>
@@ -487,14 +574,7 @@ export default function DashboardPage() {
                       <h3 className={styles.cardShopName}>{review.shop_name}</h3>
                       <div className={styles.cardMeta}>
                         <div className={styles.cardStars}>
-                          {Array.from({ length: 5 }).map((_, i) => (
-                            <Star
-                              key={i}
-                              size={14}
-                              fill={i < review.rating ? 'var(--secondary)' : 'none'}
-                              color={i < review.rating ? 'var(--secondary)' : 'var(--text-muted)'}
-                            />
-                          ))}
+                          {renderStars(review.rating, 14)}
                         </div>
                         <span className={styles.cardDate}>
                           {new Date(review.created_at).toLocaleDateString('ja-JP', {
@@ -537,12 +617,63 @@ export default function DashboardPage() {
                     </div>
                   )}
 
-                  {review.generated_review ? (
-                    <div className={styles.cardReviewText}>
-                      <strong>生成されたレビュー：</strong>
-                      <p className={styles.reviewParagraph}>{review.generated_review}</p>
-                    </div>
-                  ) : review.status === 'processing' ? (
+                  {review.generated_review ? (() => {
+                    const { title, comment } = parseReview(review.generated_review);
+                    return (
+                      <div className={styles.cardReviewText}>
+                        {title && (
+                          <div className={styles.reviewSection}>
+                            <div className={styles.reviewSectionHeader}>
+                              <strong>タイトル</strong>
+                              <button
+                                onClick={() => handleCopyToClipboard(title, `${review.id}-title`)}
+                                className={`${styles.miniCopyBtn}`}
+                                title="タイトルをコピー"
+                              >
+                                {copiedId === `${review.id}-title` ? (
+                                  <>
+                                    <Check size={11} />
+                                    <span>コピー完了</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Clipboard size={11} />
+                                    <span>コピー</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <p className={styles.reviewTitleContent}>{title}</p>
+                          </div>
+                        )}
+                        {comment && (
+                          <div className={styles.reviewSection} style={{ marginTop: '0.75rem' }}>
+                            <div className={styles.reviewSectionHeader}>
+                              <strong>コメント</strong>
+                              <button
+                                onClick={() => handleCopyToClipboard(comment, `${review.id}-comment`)}
+                                className={`${styles.miniCopyBtn}`}
+                                title="本文をコピー"
+                              >
+                                {copiedId === `${review.id}-comment` ? (
+                                  <>
+                                    <Check size={11} />
+                                    <span>コピー完了</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Clipboard size={11} />
+                                    <span>コピー</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <p className={styles.reviewParagraph}>{comment}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })() : review.status === 'processing' ? (
                     <div className={styles.generatingPlaceholder}>
                       <Loader2 className={styles.spinner} size={18} />
                       <span>AIが画像を解析し、ガイドライン適合レビューを検閲・生成しています...</span>
@@ -554,37 +685,16 @@ export default function DashboardPage() {
                   )}
 
                   <div className={styles.cardActions}>
-                    {review.generated_review && (
-                      <>
-                        <button
-                          onClick={() => handleCopyToClipboard(review.generated_review || '', review.id)}
-                          className="btn btn-primary"
-                          style={{ flex: 1 }}
-                        >
-                          {copiedId === review.id ? (
-                            <>
-                              <Check size={16} />
-                              <span>コピー完了!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Clipboard size={16} />
-                              <span>レビューをコピー</span>
-                            </>
-                          )}
-                        </button>
-
-                        {review.status === 'draft' && (
-                          <button
-                            onClick={() => handleMarkAsPosted(review.id)}
-                            className="btn btn-secondary"
-                            title="投稿完了にする"
-                          >
-                            <CheckCircle2 size={16} color="var(--success)" />
-                            <span>投稿完了</span>
-                          </button>
-                        )}
-                      </>
+                    {review.generated_review && review.status === 'draft' && (
+                      <button
+                        onClick={() => handleMarkAsPosted(review.id)}
+                        className="btn btn-secondary"
+                        style={{ flex: 1 }}
+                        title="投稿完了にする"
+                      >
+                        <CheckCircle2 size={16} color="var(--success)" />
+                        <span>投稿完了にする</span>
+                      </button>
                     )}
 
                     <button

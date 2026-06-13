@@ -106,41 +106,112 @@
 .starRatingContainer {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 1rem;
   background: rgba(28, 25, 23, 0.5);
-  padding: 0.5rem 1rem;
+  padding: 0.75rem 1rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
-  width: fit-content;
+  width: 100%;
+  flex-wrap: wrap;
 }
 
-.starButton {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
+.starsWrapper {
   display: flex;
   align-items: center;
-  justify-content: center;
-  transition: var(--transition-smooth);
-}
-
-.starButton:hover {
-  transform: scale(1.15);
+  gap: 0.25rem;
 }
 
 .starIcon {
   transition: var(--transition-smooth);
 }
 
-.ratingValue {
-  font-size: 1.15rem;
-  font-weight: 700;
-  color: var(--secondary);
-  margin-left: 0.5rem;
+.ratingSlider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  min-width: 120px;
+  height: 6px;
+  background: rgba(250, 250, 249, 0.1);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: var(--transition-smooth);
 }
 
-/* Photo Upload */
+.ratingSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  box-shadow: 0 0 8px var(--primary-glow);
+  transition: var(--transition-smooth);
+  border: none;
+}
+
+.ratingSlider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+  background: var(--primary-hover);
+}
+
+.ratingValue {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--secondary);
+  min-width: 32px;
+  text-align: right;
+}
+
+/* Photo Upload Group */
+.photoUploadGroup {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.photoPreviewCard {
+  position: relative;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 100px;
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photoPreviewMini {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.removePhotoBtn {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  background: rgba(239, 68, 68, 0.85);
+  border: none;
+  color: #ffffff;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  z-index: 15;
+}
+
+.removePhotoBtn:hover {
+  background: var(--danger);
+  transform: scale(1.1);
+}
+
 .photoUploadArea {
   position: relative;
   border: 2px dashed var(--border-color);
@@ -149,7 +220,7 @@
   cursor: pointer;
   overflow: hidden;
   transition: var(--transition-smooth);
-  min-height: 140px;
+  height: 100px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -184,10 +255,11 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
-  padding: 1.5rem;
+  justify-content: center;
+  gap: 0.25rem;
   text-align: center;
   pointer-events: none;
+  padding: 0.5rem;
 }
 
 .uploadIcon {
@@ -197,49 +269,14 @@
 
 .photoUploadArea:hover .uploadIcon {
   color: var(--primary);
-  transform: scale(1.1);
 }
 
 .uploadText {
-  font-size: 0.9rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
-.uploadSubtext {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.photoPreviewWrapper {
-  position: relative;
-  width: 100%;
-  height: 180px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.photoPreview {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.photoChangeHint {
-  position: absolute;
-  bottom: 0.5rem;
-  right: 0.5rem;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.75rem;
-  border-radius: var(--radius-sm);
-  font-weight: 500;
-  backdrop-filter: blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  pointer-events: none;
-}
 
 .formError {
   background: rgba(239, 68, 68, 0.15);
@@ -398,27 +435,70 @@
 
 .cardReviewText {
   background: rgba(249, 115, 22, 0.02);
-  border: 1px solid rgba(249, 115, 22, 0.1);
-  padding: 1rem;
+  border: 1px solid rgba(249, 115, 22, 0.15);
+  padding: 1.25rem;
   border-radius: var(--radius-sm);
-  font-size: 0.95rem;
   margin-bottom: 1.25rem;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.cardReviewText strong {
+.reviewSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.reviewSectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px dashed rgba(120, 113, 108, 0.15);
+  padding-bottom: 0.35rem;
+}
+
+.reviewSectionHeader strong {
   color: var(--primary);
-  display: block;
-  margin-bottom: 0.5rem;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
-.reviewParagraph {
+.reviewTitleContent {
   color: var(--text-primary);
+  font-weight: 600;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.reviewParagraph {
+  color: var(--text-secondary);
   white-space: pre-wrap;
-  line-height: 1.6;
+  line-height: 1.5;
+  font-size: 0.9rem;
+}
+
+.miniCopyBtn {
+  background: rgba(250, 250, 249, 0.04);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: var(--transition-smooth);
+}
+
+.miniCopyBtn:hover {
+  background: rgba(250, 250, 249, 0.1);
+  color: var(--text-primary);
+  border-color: rgba(250, 250, 249, 0.2);
 }
 
 .generatingPlaceholder {

@@ -53,9 +53,14 @@ export async function POST(request: Request) {
 
     // 2. Parse request body
     const body = await request.json();
-    const { review_id, shop_name, rating, raw_memo, image_base64 } = body;
+    const { review_id, shop_name, rating, raw_memo, image_base64, images_base64 } = body;
 
-    if (!review_id || !shop_name || !rating || !image_base64) {
+    // Support both single image (image_base64) and multiple images (images_base64)
+    const imagesArray: string[] = Array.isArray(images_base64)
+      ? images_base64
+      : (image_base64 ? [image_base64] : []);
+
+    if (!review_id || !shop_name || !rating || imagesArray.length === 0) {
       return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
 
@@ -81,12 +86,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Forbidden: You do not own this review' }, { status: 403 });
     }
 
-    // 3. Prepare Image Generative Part
-    let imagePart;
+    // 3. Prepare Image Generative Parts
+    let imageParts;
     try {
-      imagePart = fileToGenerativePart(image_base64);
+      imageParts = imagesArray.map(img => fileToGenerativePart(img));
     } catch (e: any) {
-      return NextResponse.json({ error: e.message || 'Failed to process image' }, { status: 400 });
+      return NextResponse.json({ error: e.message || 'Failed to process images' }, { status: 400 });
     }
 
     const model = genAI.getGenerativeModel({ model: geminiModelName });
@@ -94,7 +99,7 @@ export async function POST(request: Request) {
     // 4. Step 1: AI Vision (Generation)
     const visionPrompt = `
 あなたは食べログの口コミレビュー作成アシスタントです。
-提供された【画像（料理や店舗外観など）】と、ユーザーからの【体験メモ（入力がない場合は空）】を厳密に解析し、以下の指示に従って淡々とした短いレビュー（下書き）を作成してください。
+提供された【画像（料理や店舗外観など、最大3枚）】と、ユーザーからの【体験メモ（入力がない場合は空）】を厳密に解析し、以下の指示に従って淡々とした短いレビュー（下書き）を作成してください。
 
 【厳守すべき指示】
 1. 構成:
@@ -106,9 +111,9 @@ export async function POST(request: Request) {
    - 「とても美味しい」「最高」「絶品」などの過剰な褒め言葉や、かしこまった敬語表現は避け、普段メモに書き残すようなフラットで普通のトーン（例：「〜でした」「〜のようです」）にしてください。
 4. 禁止事項:
    - 店舗名および住所は、タイトルやコメント（本文）の中に絶対に含めないでください。
-   - 画像や体験メモから確認できない情報（接客態度、店内の隠れた雰囲気、素材の産地や化学調味料など）を想像で捏造しないこと。
+   - 提供された全ての画像と体験メモから確認できる情報のみを使用し、確認できない情報（接客態度、店内の隠れた雰囲気、素材の産地や化学調味料など）を想像で捏造しないこと。
 5. 内容:
-   - 画像から視覚的に判断できる特徴（具材、色合い、盛り付けの様子など）から客観的に考えられる感想。
+   - アップロードされた画像から得られる視覚的特徴（具材、盛り付け、色合いなど）から客観的に考えられる感想。
    - 体験メモがある場合は、そこに書かれている事実を自然に反映させてください。
 
 【食事情報（※本文には店舗名・住所は絶対に入れないこと）】
@@ -117,7 +122,7 @@ export async function POST(request: Request) {
 ユーザーの体験メモ: ${raw_memo || 'なし'}
 `;
 
-    const visionResult = await model.generateContent([visionPrompt, imagePart]);
+    const visionResult = await model.generateContent([visionPrompt, ...imageParts]);
     const generatedDraft = visionResult.response.text();
 
     // 5. Step 2: AI Prompt (Censorship & Hallucination Filter)
