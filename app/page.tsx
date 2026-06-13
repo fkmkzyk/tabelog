@@ -29,7 +29,7 @@ interface Review {
   rating: number;
   raw_memo: string | null;
   generated_review: string | null;
-  status: 'processing' | 'draft' | 'posted';
+  status: 'processing' | 'draft' | 'posted_tabelog' | 'posted_google' | 'posted';
   created_at: string;
 }
 
@@ -302,18 +302,28 @@ export default function DashboardPage() {
     }
   };
 
-  // Mark a draft as posted
-  const handleMarkAsPosted = async (reviewId: string) => {
+  // Mark a draft as posted on a specific platform
+  const handleMarkAsPlatformPosted = async (reviewId: string, platform: 'tabelog' | 'google') => {
+    const review = reviews.find(r => r.id === reviewId);
+    if (!review) return;
+
+    let nextStatus: 'posted_tabelog' | 'posted_google' | 'posted' = 'posted';
+    if (platform === 'tabelog') {
+      nextStatus = review.status === 'posted_google' ? 'posted' : 'posted_tabelog';
+    } else {
+      nextStatus = review.status === 'posted_tabelog' ? 'posted' : 'posted_google';
+    }
+
     try {
       const { error } = await supabase
         .from('tabelog_reviews')
-        .update({ status: 'posted' })
+        .update({ status: nextStatus })
         .eq('id', reviewId);
 
       if (error) throw error;
 
       setReviews(prev =>
-        prev.map(r => (r.id === reviewId ? { ...r, status: 'posted' } : r))
+        prev.map(r => (r.id === reviewId ? { ...r, status: nextStatus } : r))
       );
     } catch (err) {
       console.error('Failed to update status:', err);
@@ -364,7 +374,13 @@ export default function DashboardPage() {
   // Filter reviews
   const filteredReviews = reviews.filter(r => {
     if (filterTab === 'all') return true;
-    return r.status === filterTab;
+    if (filterTab === 'draft') {
+      return r.status === 'draft' || r.status === 'posted_tabelog' || r.status === 'posted_google';
+    }
+    if (filterTab === 'posted') {
+      return r.status === 'posted';
+    }
+    return true;
   });
 
   if (loadingUser) {
@@ -544,7 +560,7 @@ export default function DashboardPage() {
               onClick={() => setFilterTab('draft')}
               className={`${styles.tabBtn} ${filterTab === 'draft' ? styles.activeTab : ''}`}
             >
-              未投稿 ({reviews.filter(r => r.status === 'draft').length})
+              未投稿 ({reviews.filter(r => r.status === 'draft' || r.status === 'posted_tabelog' || r.status === 'posted_google').length})
             </button>
             <button
               onClick={() => setFilterTab('posted')}
@@ -571,7 +587,17 @@ export default function DashboardPage() {
                   
                   <div className={styles.cardHeader}>
                     <div>
-                      <h3 className={styles.cardShopName}>{review.shop_name}</h3>
+                      <h3 className={styles.cardShopName}>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(review.shop_name)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={styles.shopMapLink}
+                          title="Googleマップで場所を表示"
+                        >
+                          {review.shop_name}
+                        </a>
+                      </h3>
                       <div className={styles.cardMeta}>
                         <div className={styles.cardStars}>
                           {renderStars(review.rating, 14)}
@@ -601,10 +627,22 @@ export default function DashboardPage() {
                           <span>未投稿</span>
                         </>
                       )}
+                      {review.status === 'posted_tabelog' && (
+                        <>
+                          <CheckCircle2 size={12} color="var(--primary)" />
+                          <span>食べログ済</span>
+                        </>
+                      )}
+                      {review.status === 'posted_google' && (
+                        <>
+                          <CheckCircle2 size={12} color="var(--secondary)" />
+                          <span>Googleマップ済</span>
+                        </>
+                      )}
                       {review.status === 'posted' && (
                         <>
-                          <CheckCircle2 size={12} />
-                          <span>投稿完了</span>
+                          <CheckCircle2 size={12} color="var(--success)" />
+                          <span>すべて投稿済</span>
                         </>
                       )}
                     </span>
@@ -685,16 +723,29 @@ export default function DashboardPage() {
                   )}
 
                   <div className={styles.cardActions}>
-                    {review.generated_review && review.status === 'draft' && (
-                      <button
-                        onClick={() => handleMarkAsPosted(review.id)}
-                        className="btn btn-secondary"
-                        style={{ flex: 1 }}
-                        title="投稿完了にする"
-                      >
-                        <CheckCircle2 size={16} color="var(--success)" />
-                        <span>投稿完了にする</span>
-                      </button>
+                    {review.generated_review && review.status !== 'posted' && (
+                      <div className={styles.postedButtonsGroup}>
+                        {(review.status === 'draft' || review.status === 'posted_google') && (
+                          <button
+                            onClick={() => handleMarkAsPlatformPosted(review.id, 'tabelog')}
+                            className={`${styles.platformPostBtn} btn btn-secondary`}
+                            title="食べログへの投稿を完了にする"
+                          >
+                            <CheckCircle2 size={14} color="var(--primary)" />
+                            <span>食べログ完了</span>
+                          </button>
+                        )}
+                        {(review.status === 'draft' || review.status === 'posted_tabelog') && (
+                          <button
+                            onClick={() => handleMarkAsPlatformPosted(review.id, 'google')}
+                            className={`${styles.platformPostBtn} btn btn-secondary`}
+                            title="Googleマップへの投稿を完了にする"
+                          >
+                            <CheckCircle2 size={14} color="var(--secondary)" />
+                            <span>Googleマップ完了</span>
+                          </button>
+                        )}
+                      </div>
                     )}
 
                     <button

@@ -565,3 +565,29 @@
     transform: translateY(0);
   }
 }
+
+.shopMapLink {
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: var(--transition-smooth);
+}
+
+.shopMapLink:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.postedButtonsGroup {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.platformPostBtn {
+  flex: 1;
+  font-size: 0.75rem !important;
+  padding: 0.5rem 0.5rem !important;
+  min-width: 0;
+  white-space: nowrap;
+  gap: 0.25rem !important;
+}
