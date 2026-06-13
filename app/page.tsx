@@ -649,7 +649,7 @@ export default function DashboardPage() {
                         {comment && (
                           <div className={styles.reviewSection} style={{ marginTop: '0.75rem' }}>
                             <div className={styles.reviewSectionHeader}>
-                              <strong>コメント</strong>
+                              <strong>コメント ({comment.length}文字)</strong>
                               <button
                                 onClick={() => handleCopyToClipboard(comment, `${review.id}-comment`)}
                                 className={`${styles.miniCopyBtn}`}
