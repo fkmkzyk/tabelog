@@ -412,7 +412,7 @@ export default function DashboardPage() {
           <span className={styles.userEmail}>{user.email}</span>
           <button onClick={handleLogout} className="btn btn-secondary" title="ログアウト">
             <LogOut size={16} />
-            <span>ログアウト</span>
+            <span className={styles.logoutText}>ログアウト</span>
           </button>
         </div>
       </header>
