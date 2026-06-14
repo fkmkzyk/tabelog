@@ -873,7 +873,7 @@ export default function DashboardPage() {
                                 setRewriteError(null);
                               }
                             }}
-                            className={`${styles.platformPostBtn} btn btn-secondary ${openRewriteId === review.id ? styles.activeRewriteToggle : ''}`}
+                            className={`${styles.platformPostBtn} ${styles.rewriteBtn} btn btn-secondary ${openRewriteId === review.id ? styles.activeRewriteToggle : ''}`}
                             title="AIでレビューを修正・再生成"
                           >
                             <RefreshCw size={14} className={rewritingId === review.id ? styles.spinIcon : ''} color="var(--primary)" />

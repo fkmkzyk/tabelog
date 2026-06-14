@@ -637,6 +637,10 @@
     width: 100%;
     justify-content: center;
   }
+
+  .rewriteBtn {
+    order: -1;
+  }
 }
 
 .metaDivider {
