@@ -22,8 +22,7 @@ export async function POST(request: Request) {
     }
 
     const model = getGeminiModel();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabaseAdmin: any = getSupabaseAdmin();
+    const supabaseAdmin = getSupabaseAdmin();
 
     // Verify that the review belongs to the user
     const { data: reviewData, error: fetchError } = await supabaseAdmin
@@ -36,7 +35,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Review not found' }, { status: 404 });
     }
 
-    if ((reviewData as any).user_id !== user.id) {
+    const row = reviewData as unknown as { user_id: string };
+
+    if (row.user_id !== user.id) {
       return NextResponse.json({ error: 'Forbidden: You do not own this review' }, { status: 403 });
     }
 
@@ -44,8 +45,8 @@ export async function POST(request: Request) {
     let imageParts;
     try {
       imageParts = imagesArray.map(img => fileToGenerativePart(img));
-    } catch (e: any) {
-      return NextResponse.json({ error: e.message || 'Failed to process images' }, { status: 400 });
+    } catch (e: unknown) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to process images' }, { status: 400 });
     }
 
     // 4. Step 1: AI Vision (Generation)
@@ -110,7 +111,7 @@ ${raw_memo || 'なし'}
       .update({
         generated_review: finalReview,
         status: 'draft',
-      } as any)
+      } as unknown as never)
       .eq('id', review_id);
 
     if (updateError) {
@@ -122,9 +123,10 @@ ${raw_memo || 'なし'}
       generated_review: finalReview,
     });
 
-  } catch (error: any) {
-    const status = error.status || 500;
-    const message = error.message || 'Internal Server Error';
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    const status = err.status || 500;
+    const message = err.message || 'Internal Server Error';
     if (status === 500) console.error('Error generating review:', error);
     return NextResponse.json({ error: message }, { status });
   }

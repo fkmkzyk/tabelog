@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import type { User } from '@supabase/supabase-js';
 import styles from './dashboard.module.css';
 import {
   UtensilsCrossed,
@@ -78,7 +79,7 @@ const parseReview = (text: string | null): { title: string; comment: string } =>
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
   // Form states
@@ -102,6 +103,28 @@ export default function DashboardPage() {
   const [rewritingId, setRewritingId] = useState<string | null>(null);
   const [rewriteError, setRewriteError] = useState<string | null>(null);
 
+  // Fetch reviews list
+  const fetchReviews = useCallback(async (userId: string) => {
+    setLoadingReviews(true);
+    try {
+      const { data, error } = await supabase
+        .from('tabelog_reviews')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching reviews:', error);
+      } else {
+        setReviews(data || []);
+      }
+    } catch (err: unknown) {
+      console.error(err);
+    } finally {
+      setLoadingReviews(false);
+    }
+  }, []);
+
   // Check authentication
   useEffect(() => {
     const checkAuth = async () => {
@@ -116,29 +139,7 @@ export default function DashboardPage() {
     };
 
     checkAuth();
-  }, [router]);
-
-  // Fetch reviews list
-  const fetchReviews = async (userId: string) => {
-    setLoadingReviews(true);
-    try {
-      const { data, error } = await supabase
-        .from('tabelog_reviews')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching reviews:', error);
-      } else {
-        setReviews(data || []);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingReviews(false);
-    }
-  };
+  }, [router, fetchReviews]);
 
   // Logout handler
   const handleLogout = async () => {
@@ -206,8 +207,8 @@ export default function DashboardPage() {
     try {
       const base64s = await Promise.all(resizePromises);
       setPhotosBase64(prev => [...prev, ...base64s]);
-    } catch (err: any) {
-      setFormError(err.message || '画像の処理中にエラーが発生しました');
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : '画像の処理中にエラーが発生しました');
     }
 
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -220,6 +221,10 @@ export default function DashboardPage() {
   // Submit and trigger API route
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) {
+      setFormError('ユーザー情報が取得できません。再ログインしてください。');
+      return;
+    }
     if (!shopName) {
       setFormError('店舗名を入力してください');
       return;
@@ -297,8 +302,8 @@ export default function DashboardPage() {
       // 4. Reload lists to get final review
       fetchReviews(user.id);
 
-    } catch (err: any) {
-      setFormError(err.message || '予期せぬエラーが発生しました');
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : '予期せぬエラーが発生しました');
       if (user) fetchReviews(user.id);
     } finally {
       setGenerating(false);
@@ -388,8 +393,8 @@ export default function DashboardPage() {
       if (user) {
         fetchReviews(user.id);
       }
-    } catch (err: any) {
-      setRewriteError(err.message || '予期せぬエラーが発生しました');
+    } catch (err: unknown) {
+      setRewriteError(err instanceof Error ? err.message : '予期せぬエラーが発生しました');
     } finally {
       setRewritingId(null);
     }
@@ -469,7 +474,7 @@ export default function DashboardPage() {
         </div>
         
         <div className={styles.userInfo}>
-          <span className={styles.userEmail}>{user.email}</span>
+          <span className={styles.userEmail}>{user?.email}</span>
           <button onClick={handleLogout} className="btn btn-secondary" title="ログアウト">
             <LogOut size={16} />
             <span className={styles.logoutText}>ログアウト</span>

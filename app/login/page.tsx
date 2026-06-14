@@ -40,8 +40,8 @@ export default function LoginPage() {
       } else {
         router.push('/');
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'An unexpected error occurred.');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }

@@ -17,8 +17,7 @@ export async function POST(request: Request) {
     }
 
     const model = getGeminiModel();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabaseAdmin: any = getSupabaseAdmin();
+    const supabaseAdmin = getSupabaseAdmin();
 
     // Verify that the review exists and belongs to the user
     const { data: reviewData, error: fetchError } = await supabaseAdmin
@@ -31,11 +30,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Review not found' }, { status: 404 });
     }
 
-    const row = reviewData as any;
+    const row = reviewData as unknown as { user_id: string; shop_name: string; rating: number; raw_memo: string | null; generated_review: string | null };
 
     if (row.user_id !== user.id) {
       return NextResponse.json({ error: 'Forbidden: You do not own this review' }, { status: 403 });
     }
+
+    const shopName = row.shop_name;
+    const rating = row.rating;
+    const rawMemo = row.raw_memo;
+    const generatedReview = row.generated_review;
 
     // 3. Prepare Prompt for Rewriting & Censorship
     const rewritePrompt = `
@@ -52,16 +56,16 @@ export async function POST(request: Request) {
    - お店のPRではない、一般客としての自然で淡々とした普通の温度感で記述してください。
    - 「とても美味しい」「最高」「絶品」などの過剰な褒め言葉や、かしこまった敬語表現は避け、普段メモに書き残すようなフラットで普通のトーン（例：「〜でした」「〜のようです」）にしてください。
 4. 禁止事項の徹底排除:
-   - 店舗名（${row.shop_name}）および住所は、タイトルやコメント（本文）の中に絶対に含めないでください。
+   - 店舗名（${shopName}）および住所は、タイトルやコメント（本文）の中に絶対に含めないでください。
    - 提供された全ての情報から確認できる事実のみを使用し、確認できない情報（接客態度、店内の隠れた雰囲気、素材の産地や化学調味料など）を想像で捏造（ハルシネーション）しないこと。
 
 【食事情報】
-店舗名: ${row.shop_name}
-評価（星5段階）: ${row.rating}
-ユーザーの元の体験メモ: ${row.raw_memo || 'なし'}
+店舗名: ${shopName}
+評価（星5段階）: ${rating}
+ユーザーの元の体験メモ: ${rawMemo || 'なし'}
 
 【現在のレビュー】
-${row.generated_review || 'なし'}
+${generatedReview || 'なし'}
 
 【ユーザーからのリライトの指示】
 ${instruction}
@@ -79,7 +83,7 @@ ${instruction}
       .update({
         generated_review: finalReview,
         status: 'draft',
-      } as any)
+      } as unknown as never)
       .eq('id', review_id);
 
     if (updateError) {
@@ -91,9 +95,10 @@ ${instruction}
       generated_review: finalReview,
     });
 
-  } catch (error: any) {
-    const status = error.status || 500;
-    const message = error.message || 'Internal Server Error';
+  } catch (error: unknown) {
+    const err = error as { status?: number; message?: string };
+    const status = err.status || 500;
+    const message = err.message || 'Internal Server Error';
     if (status === 500) console.error('Error rewriting review:', error);
     return NextResponse.json({ error: message }, { status });
   }
