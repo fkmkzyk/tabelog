@@ -17,8 +17,20 @@ export async function POST(request: Request) {
       ? images_base64
       : (image_base64 ? [image_base64] : []);
 
-    if (!review_id || !shop_name || !rating || imagesArray.length === 0) {
-      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
+    if (!review_id || typeof review_id !== 'string') {
+      return NextResponse.json({ error: 'Invalid review_id' }, { status: 400 });
+    }
+    if (!shop_name || typeof shop_name !== 'string' || shop_name.length > 100) {
+      return NextResponse.json({ error: 'Invalid shop_name' }, { status: 400 });
+    }
+    if (typeof rating !== 'number' || rating < 1.0 || rating > 5.0) {
+      return NextResponse.json({ error: 'Invalid rating' }, { status: 400 });
+    }
+    if (raw_memo && (typeof raw_memo !== 'string' || raw_memo.length > 1000)) {
+      return NextResponse.json({ error: 'Invalid raw_memo' }, { status: 400 });
+    }
+    if (imagesArray.length === 0 || imagesArray.length > 3) {
+      return NextResponse.json({ error: 'Invalid images count (must be 1-3)' }, { status: 400 });
     }
 
     const model = getGeminiModel();
@@ -72,7 +84,10 @@ export async function POST(request: Request) {
 【食事情報（※本文には店舗名・住所は絶対に入れないこと）】
 店舗名: ${shop_name}
 評価（星5段階）: ${rating}
-ユーザーの体験メモ: ${raw_memo || 'なし'}
+ユーザーの体験メモ: 
+"""
+${raw_memo || 'なし'}
+"""
 `;
 
     const visionResult = await model.generateContent([visionPrompt, ...imageParts]);
@@ -96,10 +111,14 @@ export async function POST(request: Request) {
 
 【入力データ】
 生成レビュー下書き:
+"""
 ${generatedDraft}
+"""
 
 ユーザーの体験メモ:
+"""
 ${raw_memo || 'なし'}
+"""
 `;
 
     const censorshipResult = await model.generateContent(censorshipPrompt);

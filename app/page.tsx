@@ -333,8 +333,9 @@ export default function DashboardPage() {
       setReviews(prev =>
         prev.map(r => (r.id === reviewId ? { ...r, status: nextStatus } : r))
       );
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to update status:', err);
+      alert(err instanceof Error ? err.message : 'ステータスの更新に失敗しました');
     }
   };
 
@@ -351,8 +352,9 @@ export default function DashboardPage() {
       if (error) throw error;
 
       setReviews(prev => prev.filter(r => r.id !== reviewId));
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to delete review:', err);
+      alert(err instanceof Error ? err.message : '下書きの削除に失敗しました');
     }
   };
 

@@ -12,8 +12,11 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { review_id, instruction } = body;
 
-    if (!review_id || !instruction || !instruction.trim()) {
-      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
+    if (!review_id || typeof review_id !== 'string') {
+      return NextResponse.json({ error: 'Invalid review_id' }, { status: 400 });
+    }
+    if (!instruction || typeof instruction !== 'string' || !instruction.trim() || instruction.length > 500) {
+      return NextResponse.json({ error: 'Invalid instruction' }, { status: 400 });
     }
 
     const model = getGeminiModel();
@@ -62,13 +65,20 @@ export async function POST(request: Request) {
 【食事情報】
 店舗名: ${shopName}
 評価（星5段階）: ${rating}
-ユーザーの元の体験メモ: ${rawMemo || 'なし'}
+ユーザーの元の体験メモ: 
+"""
+${rawMemo || 'なし'}
+"""
 
 【現在のレビュー】
+"""
 ${generatedReview || 'なし'}
+"""
 
 【ユーザーからのリライトの指示】
+"""
 ${instruction}
+"""
 
 【出力ルール】
 検閲と修正を完了した、最終的な安全な食べログ用レビュー（タイトルとコメント）のみを返してください。挨拶、説明、修正履歴などは一切出力しないでください。
