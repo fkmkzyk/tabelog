@@ -622,6 +622,21 @@
     justify-content: center;
     border-radius: var(--radius-sm);
   }
+
+  .cardActions {
+    align-items: flex-end;
+  }
+
+  .postedButtonsGroup {
+    flex-direction: column;
+    flex: 1;
+    width: 100%;
+  }
+
+  .platformPostBtn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .metaDivider {
