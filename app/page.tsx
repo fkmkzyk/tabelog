@@ -601,6 +601,7 @@ export default function DashboardPage() {
                       <div className={styles.cardMeta}>
                         <div className={styles.cardStars}>
                           {renderStars(review.rating, 14)}
+                          <span className={styles.cardRatingValue}>{Number(review.rating).toFixed(1)}</span>
                         </div>
                         <span className={styles.cardDate}>
                           {new Date(review.created_at).toLocaleDateString('ja-JP', {
