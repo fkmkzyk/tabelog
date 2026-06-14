@@ -10,14 +10,20 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Server-side Admin Supabase instance (uses Service Role key, bypasses RLS)
+let supabaseAdminInstance: ReturnType<typeof createClient> | null = null;
+
 export const getSupabaseAdmin = () => {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.warn('Warning: SUPABASE_SERVICE_ROLE_KEY is not defined. Using placeholder admin client.');
+  if (!supabaseAdminInstance) {
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.warn('Warning: SUPABASE_SERVICE_ROLE_KEY is not defined. Using placeholder admin client.');
+    }
+    supabaseAdminInstance = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
   }
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
+  return supabaseAdminInstance;
 };
+

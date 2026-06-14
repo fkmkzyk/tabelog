@@ -1,55 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
-import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-// Initialize Gemini API
-const geminiApiKey = process.env.GEMINI_API_KEY || '';
-const geminiModelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash'; // Default to gemini-2.0-flash
-
-const genAI = geminiApiKey ? new GoogleGenerativeAI(geminiApiKey) : null;
-
-// Helper to convert base64 image data to generative part
-function fileToGenerativePart(base64Str: string) {
-  const match = base64Str.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
-  if (!match) {
-    throw new Error('Invalid base64 image format. Must start with "data:image/...;base64,"');
-  }
-  const mimeType = match[1];
-  const data = match[2];
-  
-  return {
-    inlineData: {
-      data,
-      mimeType,
-    },
-  };
-}
+import { verifyAuth } from '@/lib/auth';
+import { getGeminiModel, fileToGenerativePart } from '@/lib/gemini';
 
 export async function POST(request: Request) {
   try {
     // 1. Verify Authentication
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized: Missing token' }, { status: 401 });
-    }
-    
-    const token = authHeader.replace('Bearer ', '');
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    
-    // Create temporary supabase client with user's token to verify identity
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
-    
-    const { data: { user }, error: authError } = await userClient.auth.getUser(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized: Invalid token' }, { status: 401 });
-    }
+    const user = await verifyAuth(request);
 
     // 2. Parse request body
     const body = await request.json();
@@ -64,17 +21,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
 
-    if (!genAI) {
-      return NextResponse.json({ error: 'Gemini API is not configured on the server.' }, { status: 500 });
-    }
-
-    // Initialize Supabase Admin client
-    const supabaseAdmin = getSupabaseAdmin();
+    const model = getGeminiModel();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const supabaseAdmin: any = getSupabaseAdmin();
 
     // Verify that the review belongs to the user
     const { data: reviewData, error: fetchError } = await supabaseAdmin
       .from('tabelog_reviews')
-      .select('id, user_id')
+      .select('*')
       .eq('id', review_id)
       .single();
 
@@ -82,7 +36,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Review not found' }, { status: 404 });
     }
 
-    if (reviewData.user_id !== user.id) {
+    if ((reviewData as any).user_id !== user.id) {
       return NextResponse.json({ error: 'Forbidden: You do not own this review' }, { status: 403 });
     }
 
@@ -93,8 +47,6 @@ export async function POST(request: Request) {
     } catch (e: any) {
       return NextResponse.json({ error: e.message || 'Failed to process images' }, { status: 400 });
     }
-
-    const model = genAI.getGenerativeModel({ model: geminiModelName });
 
     // 4. Step 1: AI Vision (Generation)
     const visionPrompt = `
@@ -158,7 +110,7 @@ ${raw_memo || 'なし'}
       .update({
         generated_review: finalReview,
         status: 'draft',
-      })
+      } as any)
       .eq('id', review_id);
 
     if (updateError) {
@@ -171,7 +123,9 @@ ${raw_memo || 'なし'}
     });
 
   } catch (error: any) {
-    console.error('Error generating review:', error);
-    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+    const status = error.status || 500;
+    const message = error.message || 'Internal Server Error';
+    if (status === 500) console.error('Error generating review:', error);
+    return NextResponse.json({ error: message }, { status });
   }
 }

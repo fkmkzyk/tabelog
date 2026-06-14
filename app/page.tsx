@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import styles from './dashboard.module.css';
@@ -85,7 +85,6 @@ export default function DashboardPage() {
   const [shopName, setShopName] = useState('');
   const [rating, setRating] = useState(3.0);
   const [rawMemo, setRawMemo] = useState('');
-  const [photos, setPhotos] = useState<File[]>([]);
   const [photosBase64, setPhotosBase64] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -155,7 +154,7 @@ export default function DashboardPage() {
     setFormError(null);
     const newFiles = Array.from(files);
 
-    if (photos.length + newFiles.length > 3) {
+    if (photosBase64.length + newFiles.length > 3) {
       setFormError('画像は最大3枚までアップロードできます');
       return;
     }
@@ -206,7 +205,6 @@ export default function DashboardPage() {
 
     try {
       const base64s = await Promise.all(resizePromises);
-      setPhotos(prev => [...prev, ...newFiles]);
       setPhotosBase64(prev => [...prev, ...base64s]);
     } catch (err: any) {
       setFormError(err.message || '画像の処理中にエラーが発生しました');
@@ -216,7 +214,6 @@ export default function DashboardPage() {
   };
 
   const handleRemovePhoto = (index: number) => {
-    setPhotos(prev => prev.filter((_, i) => i !== index));
     setPhotosBase64(prev => prev.filter((_, i) => i !== index));
   };
 
@@ -263,7 +260,6 @@ export default function DashboardPage() {
       setShopName('');
       setRating(3.0);
       setRawMemo('');
-      setPhotos([]);
       setPhotosBase64([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
@@ -408,7 +404,7 @@ export default function DashboardPage() {
   };
 
   // Helper to render fractional stars (0.2 step)
-  const renderStars = (val: number, size: number = 28) => {
+  const renderStars = useCallback((val: number, size: number = 28) => {
     const stars = [];
     for (let i = 1; i <= 5; i++) {
       if (val >= i) {
@@ -420,19 +416,32 @@ export default function DashboardPage() {
       }
     }
     return stars;
-  };
+  }, []);
 
-  // Filter reviews
-  const filteredReviews = reviews.filter(r => {
-    if (filterTab === 'all') return true;
+  // Memoized review counts (single pass)
+  const reviewCounts = useMemo(() => {
+    let draft = 0;
+    let posted = 0;
+    for (const r of reviews) {
+      if (r.status === 'draft' || r.status === 'posted_tabelog' || r.status === 'posted_google') draft++;
+      else if (r.status === 'posted') posted++;
+    }
+    return { all: reviews.length, draft, posted };
+  }, [reviews]);
+
+  // Memoized filtered reviews
+  const filteredReviews = useMemo(() => {
+    if (filterTab === 'all') return reviews;
     if (filterTab === 'draft') {
-      return r.status === 'draft' || r.status === 'posted_tabelog' || r.status === 'posted_google';
+      return reviews.filter(r =>
+        r.status === 'draft' || r.status === 'posted_tabelog' || r.status === 'posted_google'
+      );
     }
     if (filterTab === 'posted') {
-      return r.status === 'posted';
+      return reviews.filter(r => r.status === 'posted');
     }
-    return true;
-  });
+    return reviews;
+  }, [reviews, filterTab]);
 
   if (loadingUser) {
     return (
@@ -605,19 +614,19 @@ export default function DashboardPage() {
               onClick={() => setFilterTab('all')}
               className={`${styles.tabBtn} ${filterTab === 'all' ? styles.activeTab : ''}`}
             >
-              すべて ({reviews.length})
+              すべて ({reviewCounts.all})
             </button>
             <button
               onClick={() => setFilterTab('draft')}
               className={`${styles.tabBtn} ${filterTab === 'draft' ? styles.activeTab : ''}`}
             >
-              未投稿 ({reviews.filter(r => r.status === 'draft' || r.status === 'posted_tabelog' || r.status === 'posted_google').length})
+              未投稿 ({reviewCounts.draft})
             </button>
             <button
               onClick={() => setFilterTab('posted')}
               className={`${styles.tabBtn} ${filterTab === 'posted' ? styles.activeTab : ''}`}
             >
-              投稿完了 ({reviews.filter(r => r.status === 'posted').length})
+              投稿完了 ({reviewCounts.posted})
             </button>
           </div>
 
