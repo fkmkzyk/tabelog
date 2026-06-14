@@ -614,7 +614,7 @@ export default function DashboardPage() {
                         </span>
                         <span className={styles.metaDivider}>|</span>
                         <a
-                          href={`/api/tabelog-search?q=${encodeURIComponent(review.shop_name)}`}
+                          href={`https://www.google.com/search?q=${encodeURIComponent(review.shop_name + ' 食べログ')}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className={styles.tabelogSearchLink}
