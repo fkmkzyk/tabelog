@@ -19,7 +19,8 @@ import {
   PlusCircle,
   FileText,
   Clock,
-  X
+  X,
+  RefreshCw
 } from 'lucide-react';
 
 interface Review {
@@ -95,6 +96,12 @@ export default function DashboardPage() {
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [filterTab, setFilterTab] = useState<'all' | 'draft' | 'posted'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Rewrite states
+  const [openRewriteId, setOpenRewriteId] = useState<string | null>(null);
+  const [rewriteInstruction, setRewriteInstruction] = useState('');
+  const [rewritingId, setRewritingId] = useState<string | null>(null);
+  const [rewriteError, setRewriteError] = useState<string | null>(null);
 
   // Check authentication
   useEffect(() => {
@@ -345,6 +352,50 @@ export default function DashboardPage() {
       setReviews(prev => prev.filter(r => r.id !== reviewId));
     } catch (err) {
       console.error('Failed to delete review:', err);
+    }
+  };
+
+  // Rewrite review text based on AI prompt
+  const handleRewrite = async (reviewId: string) => {
+    if (!rewriteInstruction.trim()) return;
+
+    setRewritingId(reviewId);
+    setRewriteError(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const response = await fetch('/api/rewrite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          review_id: reviewId,
+          instruction: rewriteInstruction,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'リライトに失敗しました');
+      }
+
+      // Close and reset states
+      setOpenRewriteId(null);
+      setRewriteInstruction('');
+      
+      // Reload lists
+      if (user) {
+        fetchReviews(user.id);
+      }
+    } catch (err: any) {
+      setRewriteError(err.message || '予期せぬエラーが発生しました');
+    } finally {
+      setRewritingId(null);
     }
   };
 
@@ -733,6 +784,59 @@ export default function DashboardPage() {
                     </div>
                   )}
 
+                  {/* Rewrite input drawer */}
+                  {openRewriteId === review.id && (
+                    <div className={styles.rewriteContainer}>
+                      <div className={styles.rewriteHeader}>
+                        <Sparkles size={14} color="var(--primary)" />
+                        <span className={styles.rewriteHeaderText}>AIレビュー修正</span>
+                      </div>
+                      {rewriteError && <div className={styles.rewriteError}>{rewriteError}</div>}
+                      <div className={styles.rewriteInputWrapper}>
+                        <textarea
+                          placeholder="例：料理の味をもっと詳しく書いて / 文字数をもう少し短くして / 少しカジュアルなトーンにして"
+                          value={rewriteInstruction}
+                          onChange={(e) => setRewriteInstruction(e.target.value)}
+                          disabled={rewritingId === review.id}
+                          className={styles.rewriteTextarea}
+                          rows={2}
+                        />
+                        <div className={styles.rewriteFormActions}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenRewriteId(null);
+                              setRewriteInstruction('');
+                              setRewriteError(null);
+                            }}
+                            className="btn btn-secondary btn-sm"
+                            disabled={rewritingId === review.id}
+                          >
+                            キャンセル
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRewrite(review.id)}
+                            className="btn btn-primary btn-sm"
+                            disabled={rewritingId === review.id || !rewriteInstruction.trim()}
+                          >
+                            {rewritingId === review.id ? (
+                              <>
+                                <Loader2 className={styles.spinner} size={12} />
+                                <span>実行中...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles size={12} />
+                                <span>実行</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className={styles.cardActions}>
                     {review.generated_review && review.status !== 'posted' && (
                       <div className={styles.postedButtonsGroup}>
@@ -754,6 +858,26 @@ export default function DashboardPage() {
                           >
                             <CheckCircle2 size={14} color="var(--secondary)" />
                             <span>Googleマップ完了</span>
+                          </button>
+                        )}
+                        {review.status !== 'processing' && (
+                          <button
+                            onClick={() => {
+                              if (openRewriteId === review.id) {
+                                setOpenRewriteId(null);
+                                setRewriteInstruction('');
+                                setRewriteError(null);
+                              } else {
+                                setOpenRewriteId(review.id);
+                                setRewriteInstruction('');
+                                setRewriteError(null);
+                              }
+                            }}
+                            className={`${styles.platformPostBtn} btn btn-secondary ${openRewriteId === review.id ? styles.activeRewriteToggle : ''}`}
+                            title="AIでレビューを修正・再生成"
+                          >
+                            <RefreshCw size={14} className={rewritingId === review.id ? styles.spinIcon : ''} color="var(--primary)" />
+                            <span>リライト</span>
                           </button>
                         )}
                       </div>
