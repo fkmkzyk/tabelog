@@ -611,6 +611,16 @@ export default function DashboardPage() {
                             minute: '2-digit'
                           })}
                         </span>
+                        <span className={styles.metaDivider}>|</span>
+                        <a
+                          href={`https://tabelog.com/rst/rstlst/?vs=1&sk=${encodeURIComponent(review.shop_name)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={styles.tabelogSearchLink}
+                          title="食べログで店舗を検索"
+                        >
+                          食べログで検索
+                        </a>
                       </div>
                     </div>
 

@@ -614,3 +614,22 @@
     border-radius: var(--radius-sm);
   }
 }
+
+.metaDivider {
+  color: var(--text-muted);
+  opacity: 0.5;
+  font-size: 0.75rem;
+}
+
+.tabelogSearchLink {
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: var(--transition-smooth);
+}
+
+.tabelogSearchLink:hover {
+  text-decoration: underline;
+  filter: brightness(1.2);
+}
