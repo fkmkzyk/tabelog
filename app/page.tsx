@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
+import exifr from 'exifr';
 import styles from './dashboard.module.css';
 import {
   UtensilsCrossed,
@@ -33,6 +34,7 @@ interface Review {
   generated_review: string | null;
   status: 'processing' | 'draft' | 'posted_tabelog' | 'posted_google' | 'posted';
   created_at: string;
+  visit_date: string | null;
 }
 
 // Helper function to parse title and comment from the generated review text
@@ -85,6 +87,7 @@ export default function DashboardPage() {
   // Form states
   const [shopName, setShopName] = useState('');
   const [rating, setRating] = useState(3.0);
+  const [visitDate, setVisitDate] = useState('');
   const [rawMemo, setRawMemo] = useState('');
   const [photosBase64, setPhotosBase64] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -207,6 +210,25 @@ export default function DashboardPage() {
     try {
       const base64s = await Promise.all(resizePromises);
       setPhotosBase64(prev => [...prev, ...base64s]);
+
+      // EXIFから撮影日時を抽出して訪問日に自動セット
+      for (const file of newFiles) {
+        try {
+          const output = await exifr.parse(file, ['DateTimeOriginal']);
+          if (output && output.DateTimeOriginal) {
+            const localDate = new Date(output.DateTimeOriginal);
+            if (!isNaN(localDate.getTime())) {
+              const yyyy = localDate.getFullYear();
+              const mm = String(localDate.getMonth() + 1).padStart(2, '0');
+              const dd = String(localDate.getDate()).padStart(2, '0');
+              setVisitDate(`${yyyy}-${mm}-${dd}`);
+              break; // 1つ取得できれば終了
+            }
+          }
+        } catch (exifErr) {
+          console.warn('EXIF解析に失敗しました:', exifErr);
+        }
+      }
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : '画像の処理中にエラーが発生しました');
     }
@@ -245,6 +267,7 @@ export default function DashboardPage() {
           user_id: user.id,
           shop_name: shopName,
           rating: rating,
+          visit_date: visitDate || null,
           raw_memo: rawMemo || null,
           status: 'processing',
         })
@@ -264,6 +287,7 @@ export default function DashboardPage() {
       // Clear input fields during processing
       setShopName('');
       setRating(3.0);
+      setVisitDate('');
       setRawMemo('');
       setPhotosBase64([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -575,6 +599,17 @@ export default function DashboardPage() {
               </div>
 
               <div className="form-group">
+                <label className="form-label">訪問日</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={visitDate}
+                  onChange={(e) => setVisitDate(e.target.value)}
+                  disabled={generating}
+                />
+              </div>
+
+              <div className="form-group">
                 <label className="form-label">体験メモ（任意・事実ベース）</label>
                 <textarea
                   placeholder="例：
@@ -665,20 +700,33 @@ export default function DashboardPage() {
                           {review.shop_name}
                         </a>
                       </h3>
-                      <div className={styles.cardMeta}>
-                        <div className={styles.cardStars}>
-                          {renderStars(review.rating, 14)}
-                          <span className={styles.cardRatingValue}>{Number(review.rating).toFixed(1)}</span>
-                        </div>
-                        <span className={styles.cardDate}>
-                          {new Date(review.created_at).toLocaleDateString('ja-JP', {
-                            year: 'numeric',
-                            month: '2-digit',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </span>
+                        <div className={styles.cardMeta}>
+                          <div className={styles.cardStars}>
+                            {renderStars(review.rating, 14)}
+                            <span className={styles.cardRatingValue}>{Number(review.rating).toFixed(1)}</span>
+                          </div>
+                          {review.visit_date && (
+                            <>
+                              <span className={styles.metaDivider}>|</span>
+                              <span className={styles.cardDate}>
+                                訪問日: {new Date(review.visit_date).toLocaleDateString('ja-JP', {
+                                  year: 'numeric',
+                                  month: '2-digit',
+                                  day: '2-digit'
+                                })}
+                              </span>
+                            </>
+                          )}
+                          <span className={styles.metaDivider}>|</span>
+                          <span className={styles.cardDate}>
+                            作成: {new Date(review.created_at).toLocaleDateString('ja-JP', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
                         <span className={styles.metaDivider}>|</span>
                         <a
                           href={`https://www.google.com/search?q=${encodeURIComponent(review.shop_name + ' 食べログ')}`}
