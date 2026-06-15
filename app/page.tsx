@@ -150,6 +150,34 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
+  // 選択されているすべての写真から撮影日を特定し、訪問日を自動更新するヘルパー
+  const updateVisitDateFromPhotos = async (currentPhotos: string[]) => {
+    if (currentPhotos.length === 0) {
+      setVisitDate('');
+      return;
+    }
+
+    // 登録されている写真の中から、撮影日時が取得できるものを探す
+    // 基本的には1枚目（インデックス0）から優先的に探索
+    for (const photoBase64 of currentPhotos) {
+      try {
+        const output = await exifr.parse(photoBase64, ['DateTimeOriginal']);
+        if (output && output.DateTimeOriginal) {
+          const localDate = new Date(output.DateTimeOriginal);
+          if (!isNaN(localDate.getTime())) {
+            const yyyy = localDate.getFullYear();
+            const mm = String(localDate.getMonth() + 1).padStart(2, '0');
+            const dd = String(localDate.getDate()).padStart(2, '0');
+            setVisitDate(`${yyyy}-${mm}-${dd}`);
+            return; // 1つ見つかればそれをセットして終了
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to parse EXIF from photo:', err);
+      }
+    }
+  };
+
   // Client-side image resizing and base64 encoding (multiple files)
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -209,26 +237,11 @@ export default function DashboardPage() {
 
     try {
       const base64s = await Promise.all(resizePromises);
-      setPhotosBase64(prev => [...prev, ...base64s]);
-
-      // EXIFから撮影日時を抽出して訪問日に自動セット
-      for (const file of newFiles) {
-        try {
-          const output = await exifr.parse(file, ['DateTimeOriginal']);
-          if (output && output.DateTimeOriginal) {
-            const localDate = new Date(output.DateTimeOriginal);
-            if (!isNaN(localDate.getTime())) {
-              const yyyy = localDate.getFullYear();
-              const mm = String(localDate.getMonth() + 1).padStart(2, '0');
-              const dd = String(localDate.getDate()).padStart(2, '0');
-              setVisitDate(`${yyyy}-${mm}-${dd}`);
-              break; // 1つ取得できれば終了
-            }
-          }
-        } catch (exifErr) {
-          console.warn('EXIF解析に失敗しました:', exifErr);
-        }
-      }
+      setPhotosBase64(prev => {
+        const updated = [...prev, ...base64s];
+        updateVisitDateFromPhotos(updated);
+        return updated;
+      });
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : '画像の処理中にエラーが発生しました');
     }
@@ -237,7 +250,11 @@ export default function DashboardPage() {
   };
 
   const handleRemovePhoto = (index: number) => {
-    setPhotosBase64(prev => prev.filter((_, i) => i !== index));
+    setPhotosBase64(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      updateVisitDateFromPhotos(updated);
+      return updated;
+    });
   };
 
   // Submit and trigger API route
