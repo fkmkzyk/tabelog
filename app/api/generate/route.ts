@@ -4,13 +4,17 @@ import { verifyAuth } from '@/lib/auth';
 import { getGeminiModel, fileToGenerativePart } from '@/lib/gemini';
 
 export async function POST(request: Request) {
+  // Set after the ownership check passes, so the catch block can safely
+  // mark the record as 'failed' without letting callers flag other users' rows.
+  let ownedReviewId: string | null = null;
+
   try {
     // 1. Verify Authentication
     const user = await verifyAuth(request);
 
     // 2. Parse request body
     const body = await request.json();
-    const { review_id, shop_name, rating, raw_memo, image_base64, images_base64 } = body;
+    const { review_id, image_base64, images_base64 } = body;
 
     // Support both single image (image_base64) and multiple images (images_base64)
     const imagesArray: string[] = Array.isArray(images_base64)
@@ -20,20 +24,10 @@ export async function POST(request: Request) {
     if (!review_id || typeof review_id !== 'string') {
       return NextResponse.json({ error: 'Invalid review_id' }, { status: 400 });
     }
-    if (!shop_name || typeof shop_name !== 'string' || shop_name.length > 100) {
-      return NextResponse.json({ error: 'Invalid shop_name' }, { status: 400 });
-    }
-    if (typeof rating !== 'number' || rating < 1.0 || rating > 5.0) {
-      return NextResponse.json({ error: 'Invalid rating' }, { status: 400 });
-    }
-    if (raw_memo && (typeof raw_memo !== 'string' || raw_memo.length > 1000)) {
-      return NextResponse.json({ error: 'Invalid raw_memo' }, { status: 400 });
-    }
     if (imagesArray.length === 0 || imagesArray.length > 3) {
       return NextResponse.json({ error: 'Invalid images count (must be 1-3)' }, { status: 400 });
     }
 
-    const model = getGeminiModel();
     const supabaseAdmin = getSupabaseAdmin();
 
     // Verify that the review belongs to the user
@@ -47,11 +41,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Review not found' }, { status: 404 });
     }
 
-    const row = reviewData as unknown as { user_id: string };
+    const row = reviewData as unknown as {
+      user_id: string;
+      shop_name: string;
+      rating: number;
+      raw_memo: string | null;
+    };
 
     if (row.user_id !== user.id) {
       return NextResponse.json({ error: 'Forbidden: You do not own this review' }, { status: 403 });
     }
+
+    ownedReviewId = review_id;
+
+    // Use the trusted values stored in the DB, not the request body
+    const shop_name = row.shop_name;
+    const rating = row.rating;
+    const raw_memo = row.raw_memo;
+
+    const model = getGeminiModel();
 
     // 3. Prepare Image Generative Parts
     let imageParts;
@@ -143,6 +151,16 @@ ${raw_memo || 'なし'}
     });
 
   } catch (error: unknown) {
+    // Mark the record as 'failed' so it does not stay stuck in 'processing'
+    // even if the client has disconnected and cannot clean up.
+    if (ownedReviewId) {
+      const { error: failError } = await getSupabaseAdmin()
+        .from('tabelog_reviews')
+        .update({ status: 'failed' } as unknown as never)
+        .eq('id', ownedReviewId);
+      if (failError) console.error('Failed to mark review as failed:', failError);
+    }
+
     const err = error as { status?: number; message?: string };
     const status = err.status || 500;
     const message = err.message || 'Internal Server Error';

@@ -503,6 +503,12 @@
   border-color: rgba(34, 197, 94, 0.2);
 }
 
+.failed {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
 .cardMemo {
   background: rgba(28, 25, 23, 0.4);
   border-left: 3px solid var(--text-muted);
@@ -681,6 +687,12 @@
   min-width: 0;
   white-space: nowrap;
   gap: 0.25rem !important;
+}
+
+.platformPostBtnDone {
+  background: var(--success-glow) !important;
+  border-color: rgba(34, 197, 94, 0.35) !important;
+  color: var(--success) !important;
 }
 
 @media (max-width: 600px) {
