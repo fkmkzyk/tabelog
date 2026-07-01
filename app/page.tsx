@@ -22,7 +22,8 @@ import {
   FileText,
   Clock,
   X,
-  RefreshCw
+  RefreshCw,
+  Edit2
 } from 'lucide-react';
 
 interface Review {
@@ -105,6 +106,11 @@ export default function DashboardPage() {
   const [rewriteInstruction, setRewriteInstruction] = useState('');
   const [rewritingId, setRewritingId] = useState<string | null>(null);
   const [rewriteError, setRewriteError] = useState<string | null>(null);
+
+  // Shop name editing states
+  const [editingShopNameId, setEditingShopNameId] = useState<string | null>(null);
+  const [editShopNameValue, setEditShopNameValue] = useState('');
+  const [savingShopNameId, setSavingShopNameId] = useState<string | null>(null);
 
   // Fetch reviews list
   const fetchReviews = useCallback(async (userId: string) => {
@@ -443,6 +449,45 @@ export default function DashboardPage() {
     }
   };
 
+  // Start shop name editing
+  const handleStartEditShopName = (reviewId: string, currentName: string) => {
+    setEditingShopNameId(reviewId);
+    setEditShopNameValue(currentName);
+  };
+
+  // Cancel shop name editing
+  const handleCancelEditShopName = () => {
+    setEditingShopNameId(null);
+    setEditShopNameValue('');
+  };
+
+  // Save modified shop name to Supabase
+  const handleSaveShopName = async (reviewId: string) => {
+    const trimmedName = editShopNameValue.trim();
+    if (!trimmedName) return;
+
+    setSavingShopNameId(reviewId);
+    try {
+      const { error } = await supabase
+        .from('tabelog_reviews')
+        .update({ shop_name: trimmedName })
+        .eq('id', reviewId);
+
+      if (error) throw error;
+
+      setReviews(prev =>
+        prev.map(r => (r.id === reviewId ? { ...r, shop_name: trimmedName } : r))
+      );
+      setEditingShopNameId(null);
+      setEditShopNameValue('');
+    } catch (err: unknown) {
+      console.error('Failed to update shop name:', err);
+      alert(err instanceof Error ? err.message : '店舗名の更新に失敗しました');
+    } finally {
+      setSavingShopNameId(null);
+    }
+  };
+
   // Copy to clipboard helper
   const handleCopyToClipboard = (text: string, copyKey: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -706,17 +751,68 @@ export default function DashboardPage() {
                   
                   <div className={styles.cardHeader}>
                     <div>
-                      <h3 className={styles.cardShopName}>
-                        <a
-                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(review.shop_name)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={styles.shopMapLink}
-                          title="Googleマップで場所を表示"
-                        >
-                          {review.shop_name}
-                        </a>
-                      </h3>
+                      {editingShopNameId === review.id ? (
+                        <div className={styles.editShopNameForm}>
+                          <input
+                            type="text"
+                            value={editShopNameValue}
+                            onChange={(e) => setEditShopNameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveShopName(review.id);
+                              if (e.key === 'Escape') handleCancelEditShopName();
+                            }}
+                            className={styles.editShopNameInput}
+                            autoFocus
+                            disabled={savingShopNameId === review.id}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveShopName(review.id)}
+                            className={`${styles.saveShopNameBtn}`}
+                            disabled={savingShopNameId === review.id || !editShopNameValue.trim()}
+                            title="保存"
+                          >
+                            {savingShopNameId === review.id ? (
+                              <Loader2 className={styles.spinner} size={13} />
+                            ) : (
+                              <Check size={13} />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelEditShopName}
+                            className={`${styles.cancelShopNameBtn}`}
+                            disabled={savingShopNameId === review.id}
+                            title="キャンセル"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className={styles.shopNameWrapper}>
+                          <h3 className={styles.cardShopName}>
+                            <a
+                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(review.shop_name)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={styles.shopMapLink}
+                              title="Googleマップで場所を表示"
+                            >
+                              {review.shop_name}
+                            </a>
+                          </h3>
+                          {review.status !== 'processing' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditShopName(review.id, review.shop_name)}
+                              className={styles.editShopNameBtn}
+                              title="店舗名を編集"
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      )}
                         <div className={styles.cardMeta}>
                           <div className={styles.cardStars}>
                             {renderStars(review.rating, 14)}
