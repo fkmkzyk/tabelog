@@ -58,6 +58,24 @@ export function parseGeneratedReview(raw: string): GeneratedReview {
 }
 
 /**
+ * Format visit date/time stored in the DB ('YYYY-MM-DD', 'HH:MM[:SS]') into a
+ * Japanese description for prompts, e.g. "2026年6月13日 19時ごろ".
+ * Returns null when no valid visit date is available.
+ */
+export function describeVisitDateTime(visitDate: string | null, visitTime: string | null): string | null {
+  if (!visitDate) return null;
+  const dateMatch = visitDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!dateMatch) return null;
+
+  let desc = `${Number(dateMatch[1])}年${Number(dateMatch[2])}月${Number(dateMatch[3])}日`;
+  const timeMatch = visitTime ? visitTime.match(/^(\d{1,2}):/) : null;
+  if (timeMatch) {
+    desc += ` ${Number(timeMatch[1])}時ごろ`;
+  }
+  return desc;
+}
+
+/**
  * Convert a data-URI base64 image string to a Gemini-compatible inline data part.
  */
 export function fileToGenerativePart(base64Str: string) {

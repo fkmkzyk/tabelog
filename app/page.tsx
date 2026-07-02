@@ -93,9 +93,12 @@ export default function DashboardPage() {
   const [visitDate, setVisitDate] = useState('');
   const [rawMemo, setRawMemo] = useState('');
   const [photosBase64, setPhotosBase64] = useState<string[]>([]);
-  // Shoot dates ('YYYY-MM-DD' or null) parallel to photosBase64, extracted from
-  // the original files' EXIF (canvas resizing strips EXIF from photosBase64).
-  const [photoDates, setPhotoDates] = useState<(string | null)[]>([]);
+  // Shoot date/time parallel to photosBase64, extracted from the original
+  // files' EXIF (canvas resizing strips EXIF from photosBase64).
+  const [photoDates, setPhotoDates] = useState<({ date: string; time: string } | null)[]>([]);
+  // Visit time ('HH:MM') auto-extracted from EXIF. Not editable in the form;
+  // used only to give the AI prompts time-of-day context (lunch / dinner).
+  const [visitTime, setVisitTime] = useState('');
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -161,9 +164,9 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
-  // 元ファイルのEXIFから撮影日（YYYY-MM-DD）を抽出するヘルパー
+  // 元ファイルのEXIFから撮影日時（YYYY-MM-DD / HH:MM）を抽出するヘルパー
   // ※リサイズ後のCanvas画像はEXIFが失われるため、必ずFileから読み取る
-  const extractPhotoDate = async (file: File): Promise<string | null> => {
+  const extractPhotoDateTime = async (file: File): Promise<{ date: string; time: string } | null> => {
     try {
       const output = await exifr.parse(file, ['DateTimeOriginal']);
       if (output && output.DateTimeOriginal) {
@@ -172,7 +175,9 @@ export default function DashboardPage() {
           const yyyy = localDate.getFullYear();
           const mm = String(localDate.getMonth() + 1).padStart(2, '0');
           const dd = String(localDate.getDate()).padStart(2, '0');
-          return `${yyyy}-${mm}-${dd}`;
+          const hh = String(localDate.getHours()).padStart(2, '0');
+          const min = String(localDate.getMinutes()).padStart(2, '0');
+          return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}` };
         }
       }
     } catch (err) {
@@ -181,17 +186,19 @@ export default function DashboardPage() {
     return null;
   };
 
-  // 登録されている写真の撮影日リストから訪問日を自動更新するヘルパー
+  // 登録されている写真の撮影日時リストから訪問日・時刻を自動更新するヘルパー
   // 1枚目（インデックス0）から優先的に採用。撮影日を持つ写真がなければ
   // 手入力の値を壊さないよう据え置き、写真が0枚になったらクリアする
-  const applyVisitDateFromPhotoDates = (currentDates: (string | null)[]) => {
+  const applyVisitDateFromPhotoDates = (currentDates: ({ date: string; time: string } | null)[]) => {
     if (currentDates.length === 0) {
       setVisitDate('');
+      setVisitTime('');
       return;
     }
     const found = currentDates.find(d => d !== null);
     if (found) {
-      setVisitDate(found);
+      setVisitDate(found.date);
+      setVisitTime(found.time);
     }
   };
 
@@ -255,7 +262,7 @@ export default function DashboardPage() {
     try {
       const [base64s, dates] = await Promise.all([
         Promise.all(resizePromises),
-        Promise.all(newFiles.map(file => extractPhotoDate(file))),
+        Promise.all(newFiles.map(file => extractPhotoDateTime(file))),
       ]);
       const updatedDates = [...photoDates, ...dates];
       setPhotosBase64(prev => [...prev, ...base64s]);
@@ -303,6 +310,7 @@ export default function DashboardPage() {
           shop_name: shopName,
           rating: rating,
           visit_date: visitDate || null,
+          visit_time: (visitDate && visitTime) ? visitTime : null,
           raw_memo: rawMemo || null,
           status: 'processing',
         })
@@ -323,6 +331,7 @@ export default function DashboardPage() {
       setShopName('');
       setRating(3.0);
       setVisitDate('');
+      setVisitTime('');
       setRawMemo('');
       setPhotosBase64([]);
       setPhotoDates([]);
