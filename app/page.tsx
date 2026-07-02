@@ -33,6 +33,8 @@ interface Review {
   rating: number;
   raw_memo: string | null;
   generated_review: string | null;
+  review_title: string | null;
+  review_comment: string | null;
   status: 'processing' | 'draft' | 'failed' | 'posted_tabelog' | 'posted_google' | 'posted';
   created_at: string;
   visit_date: string | null;
@@ -917,7 +919,10 @@ export default function DashboardPage() {
                   )}
 
                   {review.generated_review ? (() => {
-                    const { title, comment } = parseReview(review.generated_review);
+                    // Prefer the structured columns; fall back to regex parsing for old records
+                    const { title, comment } = (review.review_title || review.review_comment)
+                      ? { title: review.review_title || '', comment: review.review_comment || '' }
+                      : parseReview(review.generated_review);
                     return (
                       <div className={styles.cardReviewText}>
                         {title && (

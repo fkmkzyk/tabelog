@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyAuth } from '@/lib/auth';
-import { getGeminiModel } from '@/lib/gemini';
+import { getGeminiModel, parseGeneratedReview } from '@/lib/gemini';
 
 export async function POST(request: Request) {
   try {
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Review not found' }, { status: 404 });
     }
 
-    const row = reviewData as unknown as { user_id: string; shop_name: string; rating: number; raw_memo: string | null; generated_review: string | null };
+    const row = reviewData as unknown as { user_id: string; shop_name: string; rating: number; raw_memo: string | null; generated_review: string | null; review_title: string | null; review_comment: string | null };
 
     if (row.user_id !== user.id) {
       return NextResponse.json({ error: 'Forbidden: You do not own this review' }, { status: 403 });
@@ -42,7 +42,10 @@ export async function POST(request: Request) {
     const shopName = row.shop_name;
     const rating = row.rating;
     const rawMemo = row.raw_memo;
-    const generatedReview = row.generated_review;
+    // Prefer the structured columns; fall back to the legacy text format for old records
+    const currentReview = (row.review_title || row.review_comment)
+      ? `タイトル：${row.review_title || ''}\nコメント：${row.review_comment || ''}`
+      : row.generated_review;
 
     // 3. Prepare Prompt for Rewriting & Censorship
     const rewritePrompt = `
@@ -51,8 +54,8 @@ export async function POST(request: Request) {
 元の【食事情報】および【現在のレビュー】を踏まえた上で、ユーザーの【リライトの指示】を的確に反映した新しいレビューを作成・検閲してください。
 
 【厳守すべき検閲・修正ルール】
-1. 構成:
-   必ず「タイトル：[タイトル内容]」と「コメント：[コメント内容]」の2行構成で出力してください。
+1. 出力形式:
+   レビューのタイトルを「title」フィールドに、コメント本文を「comment」フィールドに出力してください。
 2. 文字数制限:
    コメント部分（本文）は130文字程度（目安100文字〜150文字程度）の簡潔な文章にしてください。ユーザーから「もっと長く」「もっと短く」などの指示がある場合は指示に合わせつつも、不必要に冗長にせず食べログにふさわしい簡潔さを保ってください。
 3. トーン＆マナー:
@@ -72,7 +75,7 @@ ${rawMemo || 'なし'}
 
 【現在のレビュー】
 """
-${generatedReview || 'なし'}
+${currentReview || 'なし'}
 """
 
 【ユーザーからのリライトの指示】
@@ -81,17 +84,20 @@ ${instruction}
 """
 
 【出力ルール】
-検閲と修正を完了した、最終的な安全な食べログ用レビュー（タイトルとコメント）のみを返してください。挨拶、説明、修正履歴などは一切出力しないでください。
+検閲と修正を完了した、最終的な安全な食べログ用レビューのタイトルを「title」フィールドに、コメント本文を「comment」フィールドに出力してください。挨拶、説明、修正履歴などは一切含めないでください。
 `;
 
     const result = await model.generateContent(rewritePrompt);
-    const finalReview = result.response.text().trim();
+    const finalReview = parseGeneratedReview(result.response.text());
 
     // 4. Update the DB record (Reset status to 'draft' as content changed)
+    // generated_review keeps the legacy canonical text format for backward compatibility.
     const { error: updateError } = await supabaseAdmin
       .from('tabelog_reviews')
       .update({
-        generated_review: finalReview,
+        generated_review: `タイトル：${finalReview.title}\nコメント：${finalReview.comment}`,
+        review_title: finalReview.title,
+        review_comment: finalReview.comment,
         status: 'draft',
       } as unknown as never)
       .eq('id', review_id);
@@ -102,7 +108,8 @@ ${instruction}
 
     return NextResponse.json({
       success: true,
-      generated_review: finalReview,
+      review_title: finalReview.title,
+      review_comment: finalReview.comment,
     });
 
   } catch (error: unknown) {
