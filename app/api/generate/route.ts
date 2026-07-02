@@ -1,16 +1,20 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyAuth } from '@/lib/auth';
-import { getGeminiModel, fileToGenerativePart } from '@/lib/gemini';
+import { getGeminiModel, fileToGenerativePart, parseGeneratedReview, describeVisitDateTime } from '@/lib/gemini';
 
 export async function POST(request: Request) {
+  // Set after the ownership check passes, so the catch block can safely
+  // mark the record as 'failed' without letting callers flag other users' rows.
+  let ownedReviewId: string | null = null;
+
   try {
     // 1. Verify Authentication
     const user = await verifyAuth(request);
 
     // 2. Parse request body
     const body = await request.json();
-    const { review_id, shop_name, rating, raw_memo, image_base64, images_base64 } = body;
+    const { review_id, image_base64, images_base64 } = body;
 
     // Support both single image (image_base64) and multiple images (images_base64)
     const imagesArray: string[] = Array.isArray(images_base64)
@@ -20,20 +24,10 @@ export async function POST(request: Request) {
     if (!review_id || typeof review_id !== 'string') {
       return NextResponse.json({ error: 'Invalid review_id' }, { status: 400 });
     }
-    if (!shop_name || typeof shop_name !== 'string' || shop_name.length > 100) {
-      return NextResponse.json({ error: 'Invalid shop_name' }, { status: 400 });
-    }
-    if (typeof rating !== 'number' || rating < 1.0 || rating > 5.0) {
-      return NextResponse.json({ error: 'Invalid rating' }, { status: 400 });
-    }
-    if (raw_memo && (typeof raw_memo !== 'string' || raw_memo.length > 1000)) {
-      return NextResponse.json({ error: 'Invalid raw_memo' }, { status: 400 });
-    }
     if (imagesArray.length === 0 || imagesArray.length > 3) {
       return NextResponse.json({ error: 'Invalid images count (must be 1-3)' }, { status: 400 });
     }
 
-    const model = getGeminiModel();
     const supabaseAdmin = getSupabaseAdmin();
 
     // Verify that the review belongs to the user
@@ -47,11 +41,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Review not found' }, { status: 404 });
     }
 
-    const row = reviewData as unknown as { user_id: string };
+    const row = reviewData as unknown as {
+      user_id: string;
+      shop_name: string;
+      rating: number;
+      raw_memo: string | null;
+      visit_date: string | null;
+      visit_time: string | null;
+    };
 
     if (row.user_id !== user.id) {
       return NextResponse.json({ error: 'Forbidden: You do not own this review' }, { status: 403 });
     }
+
+    ownedReviewId = review_id;
+
+    // Use the trusted values stored in the DB, not the request body
+    const shop_name = row.shop_name;
+    const rating = row.rating;
+    const raw_memo = row.raw_memo;
+    const visitDesc = describeVisitDateTime(row.visit_date, row.visit_time);
+
+    const model = getGeminiModel();
 
     // 3. Prepare Image Generative Parts
     let imageParts;
@@ -67,8 +78,8 @@ export async function POST(request: Request) {
 提供された【画像（料理や店舗外観など、最大3枚）】と、ユーザーからの【体験メモ（入力がない場合は空）】を厳密に解析し、以下の指示に従って淡々とした短いレビュー（下書き）を作成してください。
 
 【厳守すべき指示】
-1. 構成:
-   必ず「タイトル：[タイトル内容]」と「コメント：[コメント内容]」の2行構成で出力してください。
+1. 出力形式:
+   レビューのタイトルを「title」フィールドに、コメント本文を「comment」フィールドに出力してください。
 2. 文字数制限:
    コメント部分（本文）は130文字程度（目安100文字〜150文字程度）の簡潔な文章にしてください。
 3. トーン＆マナー:
@@ -80,40 +91,48 @@ export async function POST(request: Request) {
 5. 内容:
    - アップロードされた画像から得られる視覚的特徴（具材、盛り付け、色合いなど）から客観的に考えられる感想。
    - 体験メモがある場合は、そこに書かれている事実を自然に反映させてください。
+   - 訪問日時の情報がある場合は、季節や時間帯（ランチ／ディナーなど）の文脈として自然に活かして構いません（無理に言及する必要はなく、日付そのものを羅列しないこと）。
 
 【食事情報（※本文には店舗名・住所は絶対に入れないこと）】
 店舗名: ${shop_name}
 評価（星5段階）: ${rating}
-ユーザーの体験メモ: 
+訪問日時: ${visitDesc || '不明'}
+ユーザーの体験メモ:
 """
 ${raw_memo || 'なし'}
 """
 `;
 
     const visionResult = await model.generateContent([visionPrompt, ...imageParts]);
-    const generatedDraft = visionResult.response.text();
+    const draft = parseGeneratedReview(visionResult.response.text());
 
     // 5. Step 2: AI Prompt (Censorship & Hallucination Filter)
     const censorshipPrompt = `
 あなたは極めて厳格なレビュー検閲官です。前段のAIが作成した【生成レビュー下書き】と、ユーザーの【体験メモ】を対比し、以下の検閲・修正ルールに従って最終的なレビュー文を修正してください。
 
 【検閲・修正ルール】
-1. 構成の確認: 必ず「タイトル：〇〇」と「コメント：〇〇」の構成になっているか確認し、崩れている場合は修正してください。
-2. 文字数の調整: コメント（本文）の部分が130文字程度になっていることを確認してください。長すぎる場合は簡潔に削り、短すぎる場合は画像の特徴に基づく自然な描写を少し補ってください。
-3. 禁止事項の徹底排除:
+1. 文字数の調整: コメント（本文）の部分が130文字程度になっていることを確認してください。長すぎる場合は簡潔に削り、短すぎる場合は画像の特徴に基づく自然な描写を少し補ってください。
+2. 禁止事項の徹底排除:
    - 店舗名（${shop_name}）や住所が、タイトルおよびコメントに含まれている場合は完全に削除してください。
-   - 画像および体験メモから確認できないハルシネーション（勝手な想像）はすべて削除または修正してください。
-4. トーンの調整:
+   - 画像および体験メモから確認できないハルシネーション（勝手な想像）はすべて削除または修正してください。ただし下記の訪問日時は確認済みの事実であり、それに基づく季節・時間帯（ランチ／ディナーなど）への自然な言及は削除しないでください。
+3. トーンの調整:
    - お店のPR広告のような響きを一切排除し、淡々とした普通の温度感の日本語に修正してください。
 
 【出力ルール】
-検閲と修正を完了した、最終的な安全な食べログ用レビュー（タイトルとコメント）のみを返してください。挨拶、説明、修正履歴などは一切出力しないでください。
+検閲と修正を完了した、最終的な安全な食べログ用レビューのタイトルを「title」フィールドに、コメント本文を「comment」フィールドに出力してください。挨拶、説明、修正履歴などは一切含めないでください。
 
 【入力データ】
-生成レビュー下書き:
+生成レビュー下書きのタイトル:
 """
-${generatedDraft}
+${draft.title}
 """
+
+生成レビュー下書きのコメント:
+"""
+${draft.comment}
+"""
+
+訪問日時（確認済みの事実）: ${visitDesc || '不明'}
 
 ユーザーの体験メモ:
 """
@@ -122,13 +141,16 @@ ${raw_memo || 'なし'}
 `;
 
     const censorshipResult = await model.generateContent(censorshipPrompt);
-    const finalReview = censorshipResult.response.text().trim();
+    const finalReview = parseGeneratedReview(censorshipResult.response.text());
 
     // 6. Step 3: Write back to Supabase
+    // generated_review keeps the legacy canonical text format for backward compatibility.
     const { error: updateError } = await supabaseAdmin
       .from('tabelog_reviews')
       .update({
-        generated_review: finalReview,
+        generated_review: `タイトル：${finalReview.title}\nコメント：${finalReview.comment}`,
+        review_title: finalReview.title,
+        review_comment: finalReview.comment,
         status: 'draft',
       } as unknown as never)
       .eq('id', review_id);
@@ -139,10 +161,21 @@ ${raw_memo || 'なし'}
 
     return NextResponse.json({
       success: true,
-      generated_review: finalReview,
+      review_title: finalReview.title,
+      review_comment: finalReview.comment,
     });
 
   } catch (error: unknown) {
+    // Mark the record as 'failed' so it does not stay stuck in 'processing'
+    // even if the client has disconnected and cannot clean up.
+    if (ownedReviewId) {
+      const { error: failError } = await getSupabaseAdmin()
+        .from('tabelog_reviews')
+        .update({ status: 'failed' } as unknown as never)
+        .eq('id', ownedReviewId);
+      if (failError) console.error('Failed to mark review as failed:', failError);
+    }
+
     const err = error as { status?: number; message?: string };
     const status = err.status || 500;
     const message = err.message || 'Internal Server Error';

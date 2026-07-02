@@ -33,10 +33,17 @@ interface Review {
   rating: number;
   raw_memo: string | null;
   generated_review: string | null;
-  status: 'processing' | 'draft' | 'posted_tabelog' | 'posted_google' | 'posted';
+  review_title: string | null;
+  review_comment: string | null;
+  status: 'processing' | 'draft' | 'failed' | 'posted_tabelog' | 'posted_google' | 'posted';
   created_at: string;
   visit_date: string | null;
 }
+
+// 食べログの口コミタイトルの上限文字数
+const TABELOG_TITLE_MAX = 30;
+// AIに指示しているコメント文字数の目安上限
+const COMMENT_TARGET_MAX = 150;
 
 // Helper function to parse title and comment from the generated review text
 const parseReview = (text: string | null): { title: string; comment: string } => {
@@ -91,6 +98,12 @@ export default function DashboardPage() {
   const [visitDate, setVisitDate] = useState('');
   const [rawMemo, setRawMemo] = useState('');
   const [photosBase64, setPhotosBase64] = useState<string[]>([]);
+  // Shoot date/time parallel to photosBase64, extracted from the original
+  // files' EXIF (canvas resizing strips EXIF from photosBase64).
+  const [photoDates, setPhotoDates] = useState<({ date: string; time: string } | null)[]>([]);
+  // Visit time ('HH:MM') auto-extracted from EXIF. Not editable in the form;
+  // used only to give the AI prompts time-of-day context (lunch / dinner).
+  const [visitTime, setVisitTime] = useState('');
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -156,31 +169,41 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
-  // 選択されているすべての写真から撮影日を特定し、訪問日を自動更新するヘルパー
-  const updateVisitDateFromPhotos = async (currentPhotos: string[]) => {
-    if (currentPhotos.length === 0) {
+  // 元ファイルのEXIFから撮影日時（YYYY-MM-DD / HH:MM）を抽出するヘルパー
+  // ※リサイズ後のCanvas画像はEXIFが失われるため、必ずFileから読み取る
+  const extractPhotoDateTime = async (file: File): Promise<{ date: string; time: string } | null> => {
+    try {
+      const output = await exifr.parse(file, ['DateTimeOriginal']);
+      if (output && output.DateTimeOriginal) {
+        const localDate = new Date(output.DateTimeOriginal);
+        if (!isNaN(localDate.getTime())) {
+          const yyyy = localDate.getFullYear();
+          const mm = String(localDate.getMonth() + 1).padStart(2, '0');
+          const dd = String(localDate.getDate()).padStart(2, '0');
+          const hh = String(localDate.getHours()).padStart(2, '0');
+          const min = String(localDate.getMinutes()).padStart(2, '0');
+          return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}` };
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to parse EXIF from photo:', err);
+    }
+    return null;
+  };
+
+  // 登録されている写真の撮影日時リストから訪問日・時刻を自動更新するヘルパー
+  // 1枚目（インデックス0）から優先的に採用。撮影日を持つ写真がなければ
+  // 手入力の値を壊さないよう据え置き、写真が0枚になったらクリアする
+  const applyVisitDateFromPhotoDates = (currentDates: ({ date: string; time: string } | null)[]) => {
+    if (currentDates.length === 0) {
       setVisitDate('');
+      setVisitTime('');
       return;
     }
-
-    // 登録されている写真の中から、撮影日時が取得できるものを探す
-    // 基本的には1枚目（インデックス0）から優先的に探索
-    for (const photoBase64 of currentPhotos) {
-      try {
-        const output = await exifr.parse(photoBase64, ['DateTimeOriginal']);
-        if (output && output.DateTimeOriginal) {
-          const localDate = new Date(output.DateTimeOriginal);
-          if (!isNaN(localDate.getTime())) {
-            const yyyy = localDate.getFullYear();
-            const mm = String(localDate.getMonth() + 1).padStart(2, '0');
-            const dd = String(localDate.getDate()).padStart(2, '0');
-            setVisitDate(`${yyyy}-${mm}-${dd}`);
-            return; // 1つ見つかればそれをセットして終了
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to parse EXIF from photo:', err);
-      }
+    const found = currentDates.find(d => d !== null);
+    if (found) {
+      setVisitDate(found.date);
+      setVisitTime(found.time);
     }
   };
 
@@ -242,12 +265,14 @@ export default function DashboardPage() {
     });
 
     try {
-      const base64s = await Promise.all(resizePromises);
-      setPhotosBase64(prev => {
-        const updated = [...prev, ...base64s];
-        updateVisitDateFromPhotos(updated);
-        return updated;
-      });
+      const [base64s, dates] = await Promise.all([
+        Promise.all(resizePromises),
+        Promise.all(newFiles.map(file => extractPhotoDateTime(file))),
+      ]);
+      const updatedDates = [...photoDates, ...dates];
+      setPhotosBase64(prev => [...prev, ...base64s]);
+      setPhotoDates(updatedDates);
+      applyVisitDateFromPhotoDates(updatedDates);
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : '画像の処理中にエラーが発生しました');
     }
@@ -256,11 +281,10 @@ export default function DashboardPage() {
   };
 
   const handleRemovePhoto = (index: number) => {
-    setPhotosBase64(prev => {
-      const updated = prev.filter((_, i) => i !== index);
-      updateVisitDateFromPhotos(updated);
-      return updated;
-    });
+    const updatedDates = photoDates.filter((_, i) => i !== index);
+    setPhotosBase64(prev => prev.filter((_, i) => i !== index));
+    setPhotoDates(updatedDates);
+    applyVisitDateFromPhotoDates(updatedDates);
   };
 
   // Submit and trigger API route
@@ -291,6 +315,7 @@ export default function DashboardPage() {
           shop_name: shopName,
           rating: rating,
           visit_date: visitDate || null,
+          visit_time: (visitDate && visitTime) ? visitTime : null,
           raw_memo: rawMemo || null,
           status: 'processing',
         })
@@ -311,8 +336,10 @@ export default function DashboardPage() {
       setShopName('');
       setRating(3.0);
       setVisitDate('');
+      setVisitTime('');
       setRawMemo('');
       setPhotosBase64([]);
+      setPhotoDates([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       // 2. Fetch session and tokens
@@ -320,6 +347,7 @@ export default function DashboardPage() {
       const token = session?.access_token;
 
       // 3. Request review generation from Next.js server API
+      // (shop_name / rating / raw_memo are read from the DB on the server side)
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: {
@@ -328,9 +356,6 @@ export default function DashboardPage() {
         },
         body: JSON.stringify({
           review_id: insertedReview.id,
-          shop_name: insertedReview.shop_name,
-          rating: insertedReview.rating,
-          raw_memo: insertedReview.raw_memo,
           images_base64: payloadImages,
         }),
       });
@@ -338,10 +363,12 @@ export default function DashboardPage() {
       const result = await response.json();
 
       if (!response.ok) {
-        // If server failed, clean up the processing record in DB
+        // Mark the record as failed so it does not stay stuck in 'processing'.
+        // (The server also does this, but it cannot for errors that occur
+        // before the ownership check, e.g. an expired token.)
         await supabase
           .from('tabelog_reviews')
-          .delete()
+          .update({ status: 'failed' })
           .eq('id', insertedReview.id);
         throw new Error(result.error || 'レビュー生成に失敗しました');
       }
@@ -357,17 +384,22 @@ export default function DashboardPage() {
     }
   };
 
-  // Mark a draft as posted on a specific platform
-  const handleMarkAsPlatformPosted = async (reviewId: string, platform: 'tabelog' | 'google') => {
+  // Toggle the posted state of a review for a specific platform
+  const handleTogglePlatformPosted = async (reviewId: string, platform: 'tabelog' | 'google') => {
     const review = reviews.find(r => r.id === reviewId);
     if (!review) return;
 
-    let nextStatus: 'posted_tabelog' | 'posted_google' | 'posted' = 'posted';
-    if (platform === 'tabelog') {
-      nextStatus = review.status === 'posted_google' ? 'posted' : 'posted_tabelog';
-    } else {
-      nextStatus = review.status === 'posted_tabelog' ? 'posted' : 'posted_google';
-    }
+    const tabelogDone = review.status === 'posted_tabelog' || review.status === 'posted';
+    const googleDone = review.status === 'posted_google' || review.status === 'posted';
+
+    const nextTabelog = platform === 'tabelog' ? !tabelogDone : tabelogDone;
+    const nextGoogle = platform === 'google' ? !googleDone : googleDone;
+
+    const nextStatus: Review['status'] =
+      nextTabelog && nextGoogle ? 'posted'
+      : nextTabelog ? 'posted_tabelog'
+      : nextGoogle ? 'posted_google'
+      : 'draft';
 
     try {
       const { error } = await supabase
@@ -516,7 +548,7 @@ export default function DashboardPage() {
     let draft = 0;
     let posted = 0;
     for (const r of reviews) {
-      if (r.status === 'draft' || r.status === 'posted_tabelog' || r.status === 'posted_google') draft++;
+      if (r.status === 'draft' || r.status === 'failed' || r.status === 'posted_tabelog' || r.status === 'posted_google') draft++;
       else if (r.status === 'posted') posted++;
     }
     return { all: reviews.length, draft, posted };
@@ -527,7 +559,7 @@ export default function DashboardPage() {
     if (filterTab === 'all') return reviews;
     if (filterTab === 'draft') {
       return reviews.filter(r =>
-        r.status === 'draft' || r.status === 'posted_tabelog' || r.status === 'posted_google'
+        r.status === 'draft' || r.status === 'failed' || r.status === 'posted_tabelog' || r.status === 'posted_google'
       );
     }
     if (filterTab === 'posted') {
@@ -866,6 +898,12 @@ export default function DashboardPage() {
                           <span>未投稿</span>
                         </>
                       )}
+                      {review.status === 'failed' && (
+                        <>
+                          <X size={12} />
+                          <span>生成失敗</span>
+                        </>
+                      )}
                       {review.status === 'posted_tabelog' && (
                         <>
                           <CheckCircle2 size={12} color="var(--primary)" />
@@ -895,13 +933,21 @@ export default function DashboardPage() {
                   )}
 
                   {review.generated_review ? (() => {
-                    const { title, comment } = parseReview(review.generated_review);
+                    // Prefer the structured columns; fall back to regex parsing for old records
+                    const { title, comment } = (review.review_title || review.review_comment)
+                      ? { title: review.review_title || '', comment: review.review_comment || '' }
+                      : parseReview(review.generated_review);
                     return (
                       <div className={styles.cardReviewText}>
                         {title && (
                           <div className={styles.reviewSection}>
                             <div className={styles.reviewSectionHeader}>
-                              <strong>タイトル</strong>
+                              <strong>
+                                タイトル (<span className={title.length > TABELOG_TITLE_MAX ? styles.charCountOver : ''}>{title.length}文字</span>)
+                                {title.length > TABELOG_TITLE_MAX && (
+                                  <span className={styles.charLimitWarning}>食べログの上限{TABELOG_TITLE_MAX}文字を超えています</span>
+                                )}
+                              </strong>
                               <button
                                 onClick={() => handleCopyToClipboard(title, `${review.id}-title`)}
                                 className={`${styles.miniCopyBtn}`}
@@ -926,7 +972,12 @@ export default function DashboardPage() {
                         {comment && (
                           <div className={styles.reviewSection} style={{ marginTop: '0.75rem' }}>
                             <div className={styles.reviewSectionHeader}>
-                              <strong>コメント ({comment.length}文字)</strong>
+                              <strong>
+                                コメント (<span className={comment.length > COMMENT_TARGET_MAX ? styles.charCountCaution : ''}>{comment.length}文字</span>)
+                                {comment.length > COMMENT_TARGET_MAX && (
+                                  <span className={styles.charTargetNote}>目安の{COMMENT_TARGET_MAX}文字を超えています</span>
+                                )}
+                              </strong>
                               <button
                                 onClick={() => handleCopyToClipboard(comment, `${review.id}-comment`)}
                                 className={`${styles.miniCopyBtn}`}
@@ -1015,28 +1066,32 @@ export default function DashboardPage() {
                   )}
 
                   <div className={styles.cardActions}>
-                    {review.generated_review && review.status !== 'posted' && (
+                    {review.generated_review && (
                       <div className={styles.postedButtonsGroup}>
-                        {(review.status === 'draft' || review.status === 'posted_google') && (
-                          <button
-                            onClick={() => handleMarkAsPlatformPosted(review.id, 'tabelog')}
-                            className={`${styles.platformPostBtn} btn btn-secondary`}
-                            title="食べログへの投稿を完了にする"
-                          >
-                            <CheckCircle2 size={14} color="var(--primary)" />
-                            <span>食べログ完了</span>
-                          </button>
-                        )}
-                        {(review.status === 'draft' || review.status === 'posted_tabelog') && (
-                          <button
-                            onClick={() => handleMarkAsPlatformPosted(review.id, 'google')}
-                            className={`${styles.platformPostBtn} btn btn-secondary`}
-                            title="Googleマップへの投稿を完了にする"
-                          >
-                            <CheckCircle2 size={14} color="var(--secondary)" />
-                            <span>Googleマップ完了</span>
-                          </button>
-                        )}
+                        {(() => {
+                          const tabelogDone = review.status === 'posted_tabelog' || review.status === 'posted';
+                          const googleDone = review.status === 'posted_google' || review.status === 'posted';
+                          return (
+                            <>
+                              <button
+                                onClick={() => handleTogglePlatformPosted(review.id, 'tabelog')}
+                                className={`${styles.platformPostBtn} btn btn-secondary ${tabelogDone ? styles.platformPostBtnDone : ''}`}
+                                title={tabelogDone ? '食べログへの投稿完了を取り消す' : '食べログへの投稿を完了にする'}
+                              >
+                                <CheckCircle2 size={14} color={tabelogDone ? 'var(--success)' : 'var(--primary)'} />
+                                <span>{tabelogDone ? '食べログ済' : '食べログ完了'}</span>
+                              </button>
+                              <button
+                                onClick={() => handleTogglePlatformPosted(review.id, 'google')}
+                                className={`${styles.platformPostBtn} btn btn-secondary ${googleDone ? styles.platformPostBtnDone : ''}`}
+                                title={googleDone ? 'Googleマップへの投稿完了を取り消す' : 'Googleマップへの投稿を完了にする'}
+                              >
+                                <CheckCircle2 size={14} color={googleDone ? 'var(--success)' : 'var(--secondary)'} />
+                                <span>{googleDone ? 'Googleマップ済' : 'Googleマップ完了'}</span>
+                              </button>
+                            </>
+                          );
+                        })()}
                         {review.status !== 'processing' && (
                           <button
                             onClick={() => {

@@ -503,6 +503,36 @@
   border-color: rgba(34, 197, 94, 0.2);
 }
 
+.failed {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.charCountOver {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.charCountCaution {
+  color: var(--secondary);
+  font-weight: 700;
+}
+
+.charLimitWarning {
+  margin-left: 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.charTargetNote {
+  margin-left: 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--secondary);
+}
+
 .cardMemo {
   background: rgba(28, 25, 23, 0.4);
   border-left: 3px solid var(--text-muted);
@@ -681,6 +711,12 @@
   min-width: 0;
   white-space: nowrap;
   gap: 0.25rem !important;
+}
+
+.platformPostBtnDone {
+  background: var(--success-glow) !important;
+  border-color: rgba(34, 197, 94, 0.35) !important;
+  color: var(--success) !important;
 }
 
 @media (max-width: 600px) {
