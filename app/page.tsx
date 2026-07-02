@@ -40,6 +40,11 @@ interface Review {
   visit_date: string | null;
 }
 
+// 食べログの口コミタイトルの上限文字数
+const TABELOG_TITLE_MAX = 30;
+// AIに指示しているコメント文字数の目安上限
+const COMMENT_TARGET_MAX = 150;
+
 // Helper function to parse title and comment from the generated review text
 const parseReview = (text: string | null): { title: string; comment: string } => {
   if (!text) return { title: '', comment: '' };
@@ -937,7 +942,12 @@ export default function DashboardPage() {
                         {title && (
                           <div className={styles.reviewSection}>
                             <div className={styles.reviewSectionHeader}>
-                              <strong>タイトル</strong>
+                              <strong>
+                                タイトル (<span className={title.length > TABELOG_TITLE_MAX ? styles.charCountOver : ''}>{title.length}文字</span>)
+                                {title.length > TABELOG_TITLE_MAX && (
+                                  <span className={styles.charLimitWarning}>食べログの上限{TABELOG_TITLE_MAX}文字を超えています</span>
+                                )}
+                              </strong>
                               <button
                                 onClick={() => handleCopyToClipboard(title, `${review.id}-title`)}
                                 className={`${styles.miniCopyBtn}`}
@@ -962,7 +972,12 @@ export default function DashboardPage() {
                         {comment && (
                           <div className={styles.reviewSection} style={{ marginTop: '0.75rem' }}>
                             <div className={styles.reviewSectionHeader}>
-                              <strong>コメント ({comment.length}文字)</strong>
+                              <strong>
+                                コメント (<span className={comment.length > COMMENT_TARGET_MAX ? styles.charCountCaution : ''}>{comment.length}文字</span>)
+                                {comment.length > COMMENT_TARGET_MAX && (
+                                  <span className={styles.charTargetNote}>目安の{COMMENT_TARGET_MAX}文字を超えています</span>
+                                )}
+                              </strong>
                               <button
                                 onClick={() => handleCopyToClipboard(comment, `${review.id}-comment`)}
                                 className={`${styles.miniCopyBtn}`}
