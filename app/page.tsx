@@ -24,7 +24,8 @@ import {
   X,
   RefreshCw,
   Edit2,
-  MapPin
+  MapPin,
+  Wand2
 } from 'lucide-react';
 
 interface Review {
@@ -39,6 +40,11 @@ interface Review {
   status: 'processing' | 'draft' | 'failed' | 'posted_tabelog' | 'posted_google' | 'posted';
   created_at: string;
   visit_date: string | null;
+  shop_location: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  place_lat: number | null;
+  place_lng: number | null;
 }
 
 // 写真1枚分のEXIFメタデータ（撮影日時・GPS。取得できなかった項目はnull）
@@ -136,6 +142,11 @@ export default function DashboardPage() {
   const [shopNameAutoFilled, setShopNameAutoFilled] = useState(false);
   // Set once the user types the shop name manually; blocks async auto-fill races
   const shopNameManuallyEditedRef = useRef(false);
+
+  // AI shop identification states (photos -> shop name & location via Gemini)
+  const [shopLocation, setShopLocation] = useState('');
+  const [identifying, setIdentifying] = useState(false);
+  const [identifyNote, setIdentifyNote] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -306,6 +317,62 @@ export default function DashboardPage() {
     setSelectedPlace(candidate);
     setShopNameAutoFilled(true);
     shopNameManuallyEditedRef.current = false;
+    // 場所欄が空なら候補の住所で補完する（入力済みの場所は上書きしない）
+    setShopLocation(prev => prev.trim() ? prev : candidate.address);
+  };
+
+  // 写真からお店の名前と場所をAI（Gemini Vision）で推定し、フォームに反映する
+  // 看板・レシート等の文字を読み取るため、GPSのない写真でも動作する
+  const handleIdentifyShop = async () => {
+    if (photosBase64.length === 0) return;
+
+    setIdentifying(true);
+    setFormError(null);
+    setIdentifyNote(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const gps = photoMeta.find(m => m.lat !== null && m.lng !== null);
+      const response = await fetch('/api/identify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          images_base64: photosBase64,
+          ...(gps ? { latitude: gps.lat, longitude: gps.lng } : {}),
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'お店の推定に失敗しました');
+      }
+
+      if (result.shop_name) {
+        // ボタン押下による明示的な推定なので店名を上書きし、
+        // 以後のPlaces候補による自動入力はブロックする（チップのタップは引き続き有効）
+        setShopName(result.shop_name);
+        setSelectedPlace(null);
+        setShopNameAutoFilled(false);
+        shopNameManuallyEditedRef.current = true;
+      }
+      if (result.location) setShopLocation(result.location);
+
+      if (!result.shop_name && !result.location) {
+        setIdentifyNote('写真からお店を特定できませんでした。店舗名を手入力してください。');
+      } else {
+        const confLabel = result.confidence === 'high' ? '高' : result.confidence === 'medium' ? '中' : '低';
+        setIdentifyNote(`AIによる推定です（信頼度：${confLabel}）。内容を確認・修正してください。`);
+      }
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : '予期せぬエラーが発生しました');
+    } finally {
+      setIdentifying(false);
+    }
   };
 
   // Client-side image resizing and base64 encoding (multiple files)
@@ -394,9 +461,10 @@ export default function DashboardPage() {
     applyVisitDateFromPhotoMeta(updatedMeta);
 
     // 写真が0枚になったら、写真由来の自動入力・候補をクリアする
-    // （手入力した店名は保持する — 訪問日と同じ思想）
+    // （手入力した店名・場所は保持する — 訪問日と同じ思想）
     if (updatedMeta.length === 0) {
       setPlaceCandidates([]);
+      setIdentifyNote(null);
       if (shopNameAutoFilled) {
         setShopName('');
         setSelectedPlace(null);
@@ -426,6 +494,8 @@ export default function DashboardPage() {
     setFormError(null);
 
     try {
+      const firstGps = photoMeta.find(m => m.lat !== null && m.lng !== null) || null;
+
       // 1. Create a draft record in database
       const { data: insertedReview, error: insertError } = await supabase
         .from('tabelog_reviews')
@@ -440,6 +510,9 @@ export default function DashboardPage() {
           place_lat: selectedPlace?.lat ?? null,
           place_lng: selectedPlace?.lng ?? null,
           place_genre: selectedPlace?.primaryType ?? null,
+          shop_location: shopLocation.trim() || null,
+          latitude: firstGps ? firstGps.lat : null,
+          longitude: firstGps ? firstGps.lng : null,
           status: 'processing',
         })
         .select()
@@ -467,6 +540,8 @@ export default function DashboardPage() {
       setSelectedPlace(null);
       setShopNameAutoFilled(false);
       shopNameManuallyEditedRef.current = false;
+      setShopLocation('');
+      setIdentifyNote(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       // 2. Fetch session and tokens
@@ -844,6 +919,58 @@ export default function DashboardPage() {
                     </div>
                   )}
                 </div>
+
+                {photosBase64.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className={`btn btn-secondary ${styles.identifyBtn}`}
+                      onClick={handleIdentifyShop}
+                      disabled={generating || identifying}
+                    >
+                      {identifying ? (
+                        <>
+                          <Loader2 className={styles.spinner} size={16} />
+                          <span>写真を解析中...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Wand2 size={16} />
+                          <span>写真からお店の名前・場所を推定</span>
+                        </>
+                      )}
+                    </button>
+                    {identifyNote && (
+                      <p className={styles.identifyNote}>{identifyNote}</p>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">場所</label>
+                <input
+                  type="text"
+                  placeholder="例：東京都中央区銀座付近（写真から自動推定できます）"
+                  className="form-control"
+                  value={shopLocation}
+                  onChange={(e) => setShopLocation(e.target.value)}
+                  disabled={generating}
+                />
+                {(() => {
+                  const gps = photoMeta.find(m => m.lat !== null && m.lng !== null);
+                  return gps ? (
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${gps.lat},${gps.lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.gpsMapLink}
+                    >
+                      <MapPin size={12} />
+                      <span>写真の撮影地点を地図で確認</span>
+                    </a>
+                  ) : null;
+                })()}
               </div>
 
               <div className="form-group">
@@ -1016,6 +1143,33 @@ export default function DashboardPage() {
                               </span>
                             </>
                           )}
+                          {review.shop_location && (() => {
+                            // 座標は選択された店舗（Places）を優先し、なければ写真のGPS
+                            const lat = review.place_lat ?? review.latitude;
+                            const lng = review.place_lng ?? review.longitude;
+                            return (
+                              <>
+                                <span className={styles.metaDivider}>|</span>
+                                {lat != null && lng != null ? (
+                                  <a
+                                    href={`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={styles.cardLocationLink}
+                                    title="地図で場所を確認"
+                                  >
+                                    <MapPin size={11} />
+                                    <span>{review.shop_location}</span>
+                                  </a>
+                                ) : (
+                                  <span className={styles.cardLocation}>
+                                    <MapPin size={11} />
+                                    <span>{review.shop_location}</span>
+                                  </span>
+                                )}
+                              </>
+                            );
+                          })()}
                           <span className={styles.metaDivider}>|</span>
                           <span className={styles.cardDate}>
                             作成: {new Date(review.created_at).toLocaleDateString('ja-JP', {

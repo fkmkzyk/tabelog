@@ -577,6 +577,60 @@
   flex-shrink: 0;
 }
 
+/* Shop Identify (photos -> shop name & location) Feature Styles */
+.identifyBtn {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.identifyNote {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
+}
+
+.gpsMapLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.gpsMapLink:hover {
+  text-decoration: underline;
+  filter: brightness(1.2);
+}
+
+.cardLocation,
+.cardLocationLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  max-width: 100%;
+}
+
+.cardLocationLink {
+  color: var(--primary);
+}
+
+.cardLocationLink:hover {
+  text-decoration: underline;
+}
+
+.cardLocation > span,
+.cardLocationLink > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .charCountOver {
   color: var(--danger);
   font-weight: 700;
