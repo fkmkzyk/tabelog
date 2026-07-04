@@ -5,6 +5,8 @@
 - **写真を選ぶだけ**: EXIFから訪問日時を自動抽出し、GPS座標から店舗候補を自動提示（Google Places API）。GPSがない写真でも看板・レシートの読取で店名を推定（Gemini Vision）
 - **2段階AIパイプライン**: Gemini構造化出力で「生成→検閲」し、ハルシネーション・過剰な宣伝表現・店舗名の混入を排除した約130文字のレビューを作成
 - **投稿管理**: タイトル/コメントの個別コピー、文字数警告（タイトル30文字）、AIリライト、食べログ/Googleマップ別の投稿完了トグル
+- **PWA（ホーム画面保存）対応**: ホーム画面に追加した際、ブラウザの枠のない全画面表示（スタンドアロン）で起動可能。Gourmet Modernテーマに最適化した高解像ドアプリアイコン（iOSのapple-touch-icon対応）とWeb App Manifestを完備
+
 
 詳細な仕様・プロンプト設計・開発履歴は [DOCUMENTATION.md](./DOCUMENTATION.md) を参照してください。
 
@@ -84,6 +86,9 @@ app/
   api/rewrite/           # AIリライト
   api/identify/          # 写真からの店舗推定（Gemini Vision）
   api/places/nearby/     # GPS店舗検索（Places APIプロキシ）
+  apple-icon.png         # iOSホーム画面アプリアイコン (512x512)
+  icon.png               # 標準アプリアイコン (512x512)
+  manifest.json          # PWAマニフェスト設定
 lib/
   supabase.ts            # Supabaseクライアント（anon / service role）
   auth.ts                # APIルート用のJWT検証
