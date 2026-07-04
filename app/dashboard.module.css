@@ -509,6 +509,74 @@
   border-color: rgba(239, 68, 68, 0.2);
 }
 
+.placeLoading {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.placeCandidates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.placeCandidatesLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.placeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 50px;
+  font-size: 0.78rem;
+  background: rgba(28, 25, 23, 0.6);
+  border: 1px solid rgba(249, 115, 22, 0.25);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  max-width: 100%;
+}
+
+.placeChip:hover {
+  border-color: var(--primary);
+}
+
+.placeChip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.placeChipActive {
+  background: var(--primary-glow);
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.placeChipName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placeDistance {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
 .charCountOver {
   color: var(--danger);
   font-weight: 700;

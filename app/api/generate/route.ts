@@ -48,6 +48,7 @@ export async function POST(request: Request) {
       raw_memo: string | null;
       visit_date: string | null;
       visit_time: string | null;
+      place_genre: string | null;
     };
 
     if (row.user_id !== user.id) {
@@ -95,6 +96,7 @@ export async function POST(request: Request) {
 
 【食事情報（※本文には店舗名・住所は絶対に入れないこと）】
 店舗名: ${shop_name}
+店舗ジャンル: ${row.place_genre || '不明'}
 評価（星5段階）: ${rating}
 訪問日時: ${visitDesc || '不明'}
 ユーザーの体験メモ:
