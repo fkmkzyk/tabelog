@@ -1,36 +1,93 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Tabelog Draft — 食べログ下書き生成・管理アプリ
 
-## Getting Started
+食事の写真を選ぶだけで、AIが食べログ規約に配慮した口コミ下書きを生成・管理する個人用Webアプリです。
 
-First, run the development server:
+- **写真を選ぶだけ**: EXIFから訪問日時を自動抽出し、GPS座標から店舗候補を自動提示（Google Places API）。GPSがない写真でも看板・レシートの読取で店名を推定（Gemini Vision）
+- **2段階AIパイプライン**: Gemini構造化出力で「生成→検閲」し、ハルシネーション・過剰な宣伝表現・店舗名の混入を排除した約130文字のレビューを作成
+- **投稿管理**: タイトル/コメントの個別コピー、文字数警告（タイトル30文字）、AIリライト、食べログ/Googleマップ別の投稿完了トグル
+
+詳細な仕様・プロンプト設計・開発履歴は [DOCUMENTATION.md](./DOCUMENTATION.md) を参照してください。
+
+## 技術スタック
+
+| レイヤー | 技術 |
+| :--- | :--- |
+| フロントエンド | Next.js (App Router) + TypeScript + Vanilla CSS |
+| 認証・DB | Supabase (Auth / Postgres / RLS) |
+| AI | Google Gemini API（構造化出力、既定モデル `gemini-2.0-flash`） |
+| 店舗検索 | Google Places API (New) Nearby Search |
+| ホスティング | Vercel（`main` へのマージで自動デプロイ） |
+
+画像はDBに保存せず、ブラウザでCanvasリサイズ（長辺1200px・JPEG 85%）してAPIに渡す使い捨て方式のため、ストレージ費用はかかりません。
+
+## セットアップ
+
+### 1. 依存関係のインストール
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. 環境変数
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`.env.local`（Vercelでは環境変数設定）に以下を設定します。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+# Supabase（プロジェクト設定 > API から取得）
+NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...        # サーバー専用。クライアントに公開しない
 
-## Learn More
+# Google Gemini（AI生成・検閲・リライト・店舗推定）
+GEMINI_API_KEY=...
+# GEMINI_MODEL=gemini-2.0-flash      # 任意: モデルの上書き
 
-To learn more about Next.js, take a look at the following resources:
+# Google Places API New（GPS店舗自動特定。未設定でも候補が出ないだけで動作可）
+GOOGLE_PLACES_API_KEY=...
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`GOOGLE_PLACES_API_KEY` はGoogle Cloudで「Places API (New)」を有効化して発行し、**「Places API (New) のみ」のAPI制限**と **`SearchNearbyRequest per day` のクォータ上限（例: 100/日）** の設定を推奨します。FieldMaskをPro SKUに限定しているため、個人利用では月5,000回の無料枠内に収まります。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 3. データベース（Supabase）
 
-## Deploy on Vercel
+`supabase/migrations/` のSQLを日付順にすべて適用します。SupabaseダッシュボードのSQL Editorに貼り付けて実行するか、CLIで:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+supabase link --project-ref <プロジェクトref>
+supabase db push
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+ユーザーはSupabaseダッシュボードのAuthenticationから手動作成します（サインアップ画面はありません）。
+
+### 4. 起動
+
+```bash
+npm run dev    # 開発サーバー (http://localhost:3000)
+npm run build  # 本番ビルド
+npm run lint   # ESLint
+```
+
+## 使い方
+
+1. メール/パスワードでログイン
+2. 写真を選択（最大3枚）→ 訪問日と店舗候補が自動で埋まる。GPSがない写真は「写真からお店の名前・場所を推定」ボタンで補完
+3. 評価スライダー（0.2刻み）と体験メモ（任意・事実ベース）を入力して「AIレビューを生成する」
+4. 生成されたタイトル・コメントを個別コピーして食べログ/Googleマップに投稿し、完了ボタンでステータス管理
+
+## プロジェクト構成
+
+```
+app/
+  page.tsx               # ダッシュボード（投稿フォーム＋レビュー一覧）
+  login/                 # ログイン画面
+  api/generate/          # レビュー生成（2段階AIパイプライン）
+  api/rewrite/           # AIリライト
+  api/identify/          # 写真からの店舗推定（Gemini Vision）
+  api/places/nearby/     # GPS店舗検索（Places APIプロキシ）
+lib/
+  supabase.ts            # Supabaseクライアント（anon / service role）
+  auth.ts                # APIルート用のJWT検証
+  gemini.ts              # Geminiモデル設定・構造化出力スキーマ・パーサー
+  places.ts              # Places API呼び出し・距離計算
+supabase/migrations/     # DBスキーマ（適用は手動）
+```
