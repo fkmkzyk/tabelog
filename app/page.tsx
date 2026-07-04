@@ -23,7 +23,9 @@ import {
   Clock,
   X,
   RefreshCw,
-  Edit2
+  Edit2,
+  MapPin,
+  Wand2
 } from 'lucide-react';
 
 interface Review {
@@ -38,6 +40,9 @@ interface Review {
   status: 'processing' | 'draft' | 'failed' | 'posted_tabelog' | 'posted_google' | 'posted';
   created_at: string;
   visit_date: string | null;
+  shop_location: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 // 食べログの口コミタイトルの上限文字数
@@ -104,6 +109,13 @@ export default function DashboardPage() {
   // Visit time ('HH:MM') auto-extracted from EXIF. Not editable in the form;
   // used only to give the AI prompts time-of-day context (lunch / dinner).
   const [visitTime, setVisitTime] = useState('');
+  // GPS coordinates parallel to photosBase64, extracted from the original
+  // files' EXIF (canvas resizing strips EXIF from photosBase64).
+  const [photoGps, setPhotoGps] = useState<({ lat: number; lng: number } | null)[]>([]);
+  // Shop location description (e.g. "東京都中央区銀座付近"), AI-estimated but editable
+  const [shopLocation, setShopLocation] = useState('');
+  const [identifying, setIdentifying] = useState(false);
+  const [identifyNote, setIdentifyNote] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -191,6 +203,20 @@ export default function DashboardPage() {
     return null;
   };
 
+  // 元ファイルのEXIFからGPS座標を抽出するヘルパー
+  // ※リサイズ後のCanvas画像はEXIFが失われるため、必ずFileから読み取る
+  const extractPhotoGps = async (file: File): Promise<{ lat: number; lng: number } | null> => {
+    try {
+      const gps = await exifr.gps(file);
+      if (gps && Number.isFinite(gps.latitude) && Number.isFinite(gps.longitude)) {
+        return { lat: gps.latitude, lng: gps.longitude };
+      }
+    } catch (err) {
+      console.warn('Failed to parse GPS EXIF from photo:', err);
+    }
+    return null;
+  };
+
   // 登録されている写真の撮影日時リストから訪問日・時刻を自動更新するヘルパー
   // 1枚目（インデックス0）から優先的に採用。撮影日を持つ写真がなければ
   // 手入力の値を壊さないよう据え置き、写真が0枚になったらクリアする
@@ -265,13 +291,15 @@ export default function DashboardPage() {
     });
 
     try {
-      const [base64s, dates] = await Promise.all([
+      const [base64s, dates, gpsList] = await Promise.all([
         Promise.all(resizePromises),
         Promise.all(newFiles.map(file => extractPhotoDateTime(file))),
+        Promise.all(newFiles.map(file => extractPhotoGps(file))),
       ]);
       const updatedDates = [...photoDates, ...dates];
       setPhotosBase64(prev => [...prev, ...base64s]);
       setPhotoDates(updatedDates);
+      setPhotoGps(prev => [...prev, ...gpsList]);
       applyVisitDateFromPhotoDates(updatedDates);
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : '画像の処理中にエラーが発生しました');
@@ -284,7 +312,54 @@ export default function DashboardPage() {
     const updatedDates = photoDates.filter((_, i) => i !== index);
     setPhotosBase64(prev => prev.filter((_, i) => i !== index));
     setPhotoDates(updatedDates);
+    setPhotoGps(prev => prev.filter((_, i) => i !== index));
     applyVisitDateFromPhotoDates(updatedDates);
+  };
+
+  // 写真からお店の名前と場所をAIで推定し、フォームに反映する
+  const handleIdentifyShop = async () => {
+    if (photosBase64.length === 0) return;
+
+    setIdentifying(true);
+    setFormError(null);
+    setIdentifyNote(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const gps = photoGps.find(g => g !== null) || null;
+      const response = await fetch('/api/identify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          images_base64: photosBase64,
+          ...(gps ? { latitude: gps.lat, longitude: gps.lng } : {}),
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'お店の推定に失敗しました');
+      }
+
+      if (result.shop_name) setShopName(result.shop_name);
+      if (result.location) setShopLocation(result.location);
+
+      if (!result.shop_name && !result.location) {
+        setIdentifyNote('写真からお店を特定できませんでした。店舗名を手入力してください。');
+      } else {
+        const confLabel = result.confidence === 'high' ? '高' : result.confidence === 'medium' ? '中' : '低';
+        setIdentifyNote(`AIによる推定です（信頼度：${confLabel}）。内容を確認・修正してください。`);
+      }
+    } catch (err: unknown) {
+      setFormError(err instanceof Error ? err.message : '予期せぬエラーが発生しました');
+    } finally {
+      setIdentifying(false);
+    }
   };
 
   // Submit and trigger API route
@@ -307,6 +382,8 @@ export default function DashboardPage() {
     setFormError(null);
 
     try {
+      const firstGps = photoGps.find(g => g !== null) || null;
+
       // 1. Create a draft record in database
       const { data: insertedReview, error: insertError } = await supabase
         .from('tabelog_reviews')
@@ -317,6 +394,9 @@ export default function DashboardPage() {
           visit_date: visitDate || null,
           visit_time: (visitDate && visitTime) ? visitTime : null,
           raw_memo: rawMemo || null,
+          shop_location: shopLocation.trim() || null,
+          latitude: firstGps ? firstGps.lat : null,
+          longitude: firstGps ? firstGps.lng : null,
           status: 'processing',
         })
         .select()
@@ -340,6 +420,9 @@ export default function DashboardPage() {
       setRawMemo('');
       setPhotosBase64([]);
       setPhotoDates([]);
+      setPhotoGps([]);
+      setShopLocation('');
+      setIdentifyNote(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       // 2. Fetch session and tokens
@@ -690,6 +773,58 @@ export default function DashboardPage() {
                     </div>
                   )}
                 </div>
+
+                {photosBase64.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className={`btn btn-secondary ${styles.identifyBtn}`}
+                      onClick={handleIdentifyShop}
+                      disabled={generating || identifying}
+                    >
+                      {identifying ? (
+                        <>
+                          <Loader2 className={styles.spinner} size={16} />
+                          <span>写真を解析中...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Wand2 size={16} />
+                          <span>写真からお店の名前・場所を推定</span>
+                        </>
+                      )}
+                    </button>
+                    {identifyNote && (
+                      <p className={styles.identifyNote}>{identifyNote}</p>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">場所</label>
+                <input
+                  type="text"
+                  placeholder="例：東京都中央区銀座付近（写真から自動推定できます）"
+                  className="form-control"
+                  value={shopLocation}
+                  onChange={(e) => setShopLocation(e.target.value)}
+                  disabled={generating}
+                />
+                {(() => {
+                  const gps = photoGps.find(g => g !== null);
+                  return gps ? (
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${gps.lat},${gps.lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.gpsMapLink}
+                    >
+                      <MapPin size={12} />
+                      <span>写真の撮影地点を地図で確認</span>
+                    </a>
+                  ) : null;
+                })()}
               </div>
 
               <div className="form-group">
