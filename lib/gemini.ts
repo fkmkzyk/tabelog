@@ -34,6 +34,71 @@ export function getGeminiModel() {
   });
 }
 
+// Structured output schema for shop identification from photos.
+const identifyResponseSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    shop_name: {
+      type: SchemaType.STRING,
+      description: '写真から推定した飲食店の店名。特定できない場合は空文字',
+    },
+    location: {
+      type: SchemaType.STRING,
+      description: '推定した店の場所（例：「東京都中央区銀座付近」）。不明な場合は空文字',
+    },
+    confidence: {
+      type: SchemaType.STRING,
+      description: '推定の信頼度',
+      enum: ['high', 'medium', 'low'],
+      format: 'enum',
+    },
+  },
+  required: ['shop_name', 'location', 'confidence'],
+};
+
+/**
+ * Get a Gemini model configured to return structured JSON
+ * ({shop_name, location, confidence}) for shop identification.
+ */
+export function getGeminiIdentifyModel() {
+  if (!genAI) {
+    throw { message: 'Gemini API is not configured on the server.', status: 500 };
+  }
+  return genAI.getGenerativeModel({
+    model: geminiModelName,
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: identifyResponseSchema,
+    },
+  });
+}
+
+export interface IdentifiedShop {
+  shop_name: string;
+  location: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+/**
+ * Parse a structured-output response into {shop_name, location, confidence}.
+ * Throws a structured error if the response is not the expected JSON.
+ */
+export function parseIdentifiedShop(raw: string): IdentifiedShop {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw { message: 'AIの応答（JSON）の解析に失敗しました', status: 502 };
+  }
+  const obj = parsed as { shop_name?: unknown; location?: unknown; confidence?: unknown };
+  if (typeof obj.shop_name !== 'string' || typeof obj.location !== 'string') {
+    throw { message: 'AIの応答に必要なフィールド（shop_name / location）がありません', status: 502 };
+  }
+  const confidence =
+    obj.confidence === 'high' || obj.confidence === 'medium' ? obj.confidence : 'low';
+  return { shop_name: obj.shop_name.trim(), location: obj.location.trim(), confidence };
+}
+
 export interface GeneratedReview {
   title: string;
   comment: string;
