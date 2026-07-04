@@ -1,0 +1,21 @@
+{
+  "name": "Tabelog Draft Assistant",
+  "short_name": "食べログ下書き",
+  "description": "AIを活用して食べログの規約に適合した口コミ下書きを自動生成・管理する個人用Webアプリ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c0a09",
+  "theme_color": "#f97316",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
