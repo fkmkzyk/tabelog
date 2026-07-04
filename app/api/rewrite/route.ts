@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Review not found' }, { status: 404 });
     }
 
-    const row = reviewData as unknown as { user_id: string; shop_name: string; rating: number; raw_memo: string | null; generated_review: string | null; review_title: string | null; review_comment: string | null; visit_date: string | null; visit_time: string | null };
+    const row = reviewData as unknown as { user_id: string; shop_name: string; rating: number; raw_memo: string | null; generated_review: string | null; review_title: string | null; review_comment: string | null; visit_date: string | null; visit_time: string | null; place_genre: string | null };
 
     if (row.user_id !== user.id) {
       return NextResponse.json({ error: 'Forbidden: You do not own this review' }, { status: 403 });
@@ -67,6 +67,7 @@ export async function POST(request: Request) {
 
 【食事情報】
 店舗名: ${shopName}
+店舗ジャンル: ${row.place_genre || '不明'}
 評価（星5段階）: ${rating}
 訪問日時（確認済みの事実。季節や時間帯の文脈として自然に活かして良い）: ${describeVisitDateTime(row.visit_date, row.visit_time) || '不明'}
 ユーザーの元の体験メモ:
