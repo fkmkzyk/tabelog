@@ -295,6 +295,8 @@ export default function DashboardPage() {
         setShopName(candidates[0].name);
         setSelectedPlace(candidates[0]);
         setShopNameAutoFilled(true);
+        // 正確な住所（Google Places由来）で場所欄も補完する（空欄のみ）
+        setShopLocation(prev => prev.trim() ? prev : candidates[0].address);
       }
     } catch (err) {
       console.warn('Failed to fetch place candidates:', err);
@@ -323,6 +325,8 @@ export default function DashboardPage() {
 
   // 写真からお店の名前と場所をAI（Gemini Vision）で推定し、フォームに反映する
   // 看板・レシート等の文字を読み取るため、GPSのない写真でも動作する
+  // ※GPS座標は渡さない（LLMは座標から地名を復元できず誤った住所を生成するため。
+  //   GPSがある場合の正確な住所はPlaces API候補から取得する）
   const handleIdentifyShop = async () => {
     if (photosBase64.length === 0) return;
 
@@ -334,7 +338,6 @@ export default function DashboardPage() {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
-      const gps = photoMeta.find(m => m.lat !== null && m.lng !== null);
       const response = await fetch('/api/identify', {
         method: 'POST',
         headers: {
@@ -343,7 +346,6 @@ export default function DashboardPage() {
         },
         body: JSON.stringify({
           images_base64: photosBase64,
-          ...(gps ? { latitude: gps.lat, longitude: gps.lng } : {}),
         }),
       });
 
@@ -360,7 +362,10 @@ export default function DashboardPage() {
         setShopNameAutoFilled(false);
         shopNameManuallyEditedRef.current = true;
       }
-      if (result.location) setShopLocation(result.location);
+      if (result.location) {
+        // Places候補由来・手入力済みの場所は正確なので上書きしない（空欄のみ補完）
+        setShopLocation(prev => prev.trim() ? prev : result.location);
+      }
 
       if (!result.shop_name && !result.location) {
         setIdentifyNote('写真からお店を特定できませんでした。店舗名を手入力してください。');

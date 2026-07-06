@@ -44,7 +44,7 @@ const identifyResponseSchema: ResponseSchema = {
     },
     location: {
       type: SchemaType.STRING,
-      description: '推定した店の場所（例：「東京都中央区銀座付近」）。不明な場合は空文字',
+      description: '画像内に写っている住所・地名から読み取った店の場所（例：「東京都中央区銀座付近」）。画像から直接確認できない場合は空文字',
     },
     confidence: {
       type: SchemaType.STRING,
