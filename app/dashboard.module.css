@@ -744,6 +744,56 @@
   border-color: rgba(250, 250, 249, 0.2);
 }
 
+.reviewSectionActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.reviewEditForm {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.reviewEditInput,
+.reviewEditTextarea {
+  width: 100%;
+  background: rgba(28, 25, 23, 0.6);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.65rem;
+  outline: none;
+}
+
+.reviewEditTextarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.reviewEditActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.reviewEditFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.reviewEditCount {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .generatingPlaceholder {
   display: flex;
   align-items: center;

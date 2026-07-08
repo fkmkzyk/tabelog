@@ -168,6 +168,12 @@ export default function DashboardPage() {
   const [editShopNameValue, setEditShopNameValue] = useState('');
   const [savingShopNameId, setSavingShopNameId] = useState<string | null>(null);
 
+  // Review title/comment inline editing states
+  // editingReviewKey is `${reviewId}-title` or `${reviewId}-comment`
+  const [editingReviewKey, setEditingReviewKey] = useState<string | null>(null);
+  const [editReviewValue, setEditReviewValue] = useState('');
+  const [savingReviewKey, setSavingReviewKey] = useState<string | null>(null);
+
   // Fetch reviews list
   const fetchReviews = useCallback(async (userId: string) => {
     setLoadingReviews(true);
@@ -727,6 +733,75 @@ export default function DashboardPage() {
     }
   };
 
+  // Resolve a review's current title/comment (structured columns first,
+  // regex-parsed legacy text as fallback). Shared by render and edit handlers.
+  const getReviewParts = useCallback((review: Review): { title: string; comment: string } => {
+    if (review.review_title || review.review_comment) {
+      return { title: review.review_title || '', comment: review.review_comment || '' };
+    }
+    return parseReview(review.generated_review);
+  }, []);
+
+  // Start editing a review's title or comment
+  const handleStartEditReview = (review: Review, field: 'title' | 'comment') => {
+    const { title, comment } = getReviewParts(review);
+    setEditingReviewKey(`${review.id}-${field}`);
+    setEditReviewValue(field === 'title' ? title : comment);
+  };
+
+  // Cancel review editing
+  const handleCancelEditReview = () => {
+    setEditingReviewKey(null);
+    setEditReviewValue('');
+  };
+
+  // Save an edited review title/comment to Supabase.
+  // Writes the structured columns and keeps generated_review in the legacy
+  // "タイトル：…\nコメント：…" format for backward compatibility.
+  const handleSaveReview = async (review: Review, field: 'title' | 'comment') => {
+    const trimmed = editReviewValue.trim();
+    if (!trimmed) return;
+
+    const current = getReviewParts(review);
+    const nextTitle = field === 'title' ? trimmed : current.title;
+    const nextComment = field === 'comment' ? trimmed : current.comment;
+
+    const key = `${review.id}-${field}`;
+    setSavingReviewKey(key);
+    try {
+      const { error } = await supabase
+        .from('tabelog_reviews')
+        .update({
+          review_title: nextTitle,
+          review_comment: nextComment,
+          generated_review: `タイトル：${nextTitle}\nコメント：${nextComment}`,
+        })
+        .eq('id', review.id);
+
+      if (error) throw error;
+
+      setReviews(prev =>
+        prev.map(r =>
+          r.id === review.id
+            ? {
+                ...r,
+                review_title: nextTitle,
+                review_comment: nextComment,
+                generated_review: `タイトル：${nextTitle}\nコメント：${nextComment}`,
+              }
+            : r
+        )
+      );
+      setEditingReviewKey(null);
+      setEditReviewValue('');
+    } catch (err: unknown) {
+      console.error('Failed to update review:', err);
+      alert(err instanceof Error ? err.message : 'レビューの更新に失敗しました');
+    } finally {
+      setSavingReviewKey(null);
+    }
+  };
+
   // Copy to clipboard helper
   const handleCopyToClipboard = (text: string, copyKey: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -1125,6 +1200,7 @@ export default function DashboardPage() {
                               onClick={() => handleStartEditShopName(review.id, review.shop_name)}
                               className={styles.editShopNameBtn}
                               title="店舗名を編集"
+                              aria-label="店舗名を編集"
                             >
                               <Edit2 size={13} />
                             </button>
@@ -1247,9 +1323,11 @@ export default function DashboardPage() {
 
                   {review.generated_review ? (() => {
                     // Prefer the structured columns; fall back to regex parsing for old records
-                    const { title, comment } = (review.review_title || review.review_comment)
-                      ? { title: review.review_title || '', comment: review.review_comment || '' }
-                      : parseReview(review.generated_review);
+                    const { title, comment } = getReviewParts(review);
+                    const titleKey = `${review.id}-title`;
+                    const commentKey = `${review.id}-comment`;
+                    const editingTitle = editingReviewKey === titleKey;
+                    const editingComment = editingReviewKey === commentKey;
                     return (
                       <div className={styles.cardReviewText}>
                         {title && (
@@ -1261,25 +1339,72 @@ export default function DashboardPage() {
                                   <span className={styles.charLimitWarning}>食べログの上限{TABELOG_TITLE_MAX}文字を超えています</span>
                                 )}
                               </strong>
-                              <button
-                                onClick={() => handleCopyToClipboard(title, `${review.id}-title`)}
-                                className={`${styles.miniCopyBtn}`}
-                                title="タイトルをコピー"
-                              >
-                                {copiedId === `${review.id}-title` ? (
-                                  <>
-                                    <Check size={11} />
-                                    <span>コピー完了</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Clipboard size={11} />
-                                    <span>コピー</span>
-                                  </>
-                                )}
-                              </button>
+                              {!editingTitle && (
+                                <div className={styles.reviewSectionActions}>
+                                  <button
+                                    onClick={() => handleStartEditReview(review, 'title')}
+                                    className={`${styles.miniCopyBtn}`}
+                                    title="タイトルを編集"
+                                  >
+                                    <Edit2 size={11} />
+                                    <span>編集</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleCopyToClipboard(title, titleKey)}
+                                    className={`${styles.miniCopyBtn}`}
+                                    title="タイトルをコピー"
+                                  >
+                                    {copiedId === titleKey ? (
+                                      <>
+                                        <Check size={11} />
+                                        <span>コピー完了</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Clipboard size={11} />
+                                        <span>コピー</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                            <p className={styles.reviewTitleContent}>{title}</p>
+                            {editingTitle ? (
+                              <div className={styles.reviewEditForm}>
+                                <input
+                                  type="text"
+                                  value={editReviewValue}
+                                  onChange={(e) => setEditReviewValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSaveReview(review, 'title');
+                                    if (e.key === 'Escape') handleCancelEditReview();
+                                  }}
+                                  className={styles.reviewEditInput}
+                                  autoFocus
+                                  disabled={savingReviewKey === titleKey}
+                                />
+                                <div className={styles.reviewEditActions}>
+                                  <button
+                                    onClick={() => handleSaveReview(review, 'title')}
+                                    className="btn btn-primary btn-sm"
+                                    disabled={savingReviewKey === titleKey || !editReviewValue.trim()}
+                                  >
+                                    {savingReviewKey === titleKey ? <Loader2 className={styles.spinner} size={12} /> : <Check size={12} />}
+                                    <span>保存</span>
+                                  </button>
+                                  <button
+                                    onClick={handleCancelEditReview}
+                                    className="btn btn-secondary btn-sm"
+                                    disabled={savingReviewKey === titleKey}
+                                  >
+                                    <X size={12} />
+                                    <span>キャンセル</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className={styles.reviewTitleContent}>{title}</p>
+                            )}
                           </div>
                         )}
                         {comment && (
@@ -1291,25 +1416,76 @@ export default function DashboardPage() {
                                   <span className={styles.charTargetNote}>目安の{COMMENT_TARGET_MAX}文字を超えています</span>
                                 )}
                               </strong>
-                              <button
-                                onClick={() => handleCopyToClipboard(comment, `${review.id}-comment`)}
-                                className={`${styles.miniCopyBtn}`}
-                                title="本文をコピー"
-                              >
-                                {copiedId === `${review.id}-comment` ? (
-                                  <>
-                                    <Check size={11} />
-                                    <span>コピー完了</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Clipboard size={11} />
-                                    <span>コピー</span>
-                                  </>
-                                )}
-                              </button>
+                              {!editingComment && (
+                                <div className={styles.reviewSectionActions}>
+                                  <button
+                                    onClick={() => handleStartEditReview(review, 'comment')}
+                                    className={`${styles.miniCopyBtn}`}
+                                    title="本文を編集"
+                                  >
+                                    <Edit2 size={11} />
+                                    <span>編集</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleCopyToClipboard(comment, commentKey)}
+                                    className={`${styles.miniCopyBtn}`}
+                                    title="本文をコピー"
+                                  >
+                                    {copiedId === commentKey ? (
+                                      <>
+                                        <Check size={11} />
+                                        <span>コピー完了</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Clipboard size={11} />
+                                        <span>コピー</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                            <p className={styles.reviewParagraph}>{comment}</p>
+                            {editingComment ? (
+                              <div className={styles.reviewEditForm}>
+                                <textarea
+                                  value={editReviewValue}
+                                  onChange={(e) => setEditReviewValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Escape') handleCancelEditReview();
+                                  }}
+                                  rows={5}
+                                  className={styles.reviewEditTextarea}
+                                  autoFocus
+                                  disabled={savingReviewKey === commentKey}
+                                />
+                                <div className={styles.reviewEditFooter}>
+                                  <span className={editReviewValue.length > COMMENT_TARGET_MAX ? styles.charCountCaution : styles.reviewEditCount}>
+                                    {editReviewValue.length}文字
+                                  </span>
+                                  <div className={styles.reviewEditActions}>
+                                    <button
+                                      onClick={() => handleSaveReview(review, 'comment')}
+                                      className="btn btn-primary btn-sm"
+                                      disabled={savingReviewKey === commentKey || !editReviewValue.trim()}
+                                    >
+                                      {savingReviewKey === commentKey ? <Loader2 className={styles.spinner} size={12} /> : <Check size={12} />}
+                                      <span>保存</span>
+                                    </button>
+                                    <button
+                                      onClick={handleCancelEditReview}
+                                      className="btn btn-secondary btn-sm"
+                                      disabled={savingReviewKey === commentKey}
+                                    >
+                                      <X size={12} />
+                                      <span>キャンセル</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className={styles.reviewParagraph}>{comment}</p>
+                            )}
                           </div>
                         )}
                       </div>
