@@ -45,6 +45,7 @@ interface Review {
   longitude: number | null;
   place_lat: number | null;
   place_lng: number | null;
+  photo_thumbs: string[] | null;
 }
 
 // 写真1枚分のEXIFメタデータ（撮影日時・GPS。取得できなかった項目はnull）
@@ -73,6 +74,64 @@ const PLACE_AUTOFILL_MAX_METERS = 50;
 const TABELOG_TITLE_MAX = 30;
 // AIに指示しているコメント文字数の目安上限
 const COMMENT_TARGET_MAX = 150;
+
+// AI解析用リサイズと保存用サムネイルの設定
+const AI_IMAGE_MAX_EDGE = 1200;
+const AI_IMAGE_QUALITY = 0.85;
+const THUMB_MAX_EDGE = 320;
+const THUMB_QUALITY = 0.7;
+// サムネイル保存先のSupabase Storageバケット（非公開・RLSで本人のみ）
+const THUMBS_BUCKET = 'review-thumbs';
+
+// 画像ファイルを長辺maxEdgeに収めたJPEGのdataURLへリサイズするヘルパー
+const resizeImageFile = (file: File, maxEdge: number, quality: number): Promise<string> => {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxEdge) {
+            height = Math.round((height * maxEdge) / width);
+            width = maxEdge;
+          }
+        } else {
+          if (height > maxEdge) {
+            width = Math.round((width * maxEdge) / height);
+            height = maxEdge;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvasコンテキストの取得に失敗しました'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
+    };
+    reader.onerror = () => reject(new Error('ファイルの読み込みに失敗しました'));
+  });
+};
+
+// dataURL（JPEG）をStorageアップロード用のBlobへ変換するヘルパー
+const dataUrlToBlob = (dataUrl: string): Blob => {
+  const base64 = dataUrl.split(',')[1];
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: 'image/jpeg' });
+};
 
 // Helper function to parse title and comment from the generated review text
 const parseReview = (text: string | null): { title: string; comment: string } => {
@@ -127,6 +186,8 @@ export default function DashboardPage() {
   const [visitDate, setVisitDate] = useState('');
   const [rawMemo, setRawMemo] = useState('');
   const [photosBase64, setPhotosBase64] = useState<string[]>([]);
+  // 320px thumbnails parallel to photosBase64, uploaded to Storage on submit
+  const [photoThumbsBase64, setPhotoThumbsBase64] = useState<string[]>([]);
   // Shoot date/time and GPS parallel to photosBase64, extracted from the
   // original files' EXIF (canvas resizing strips EXIF from photosBase64).
   const [photoMeta, setPhotoMeta] = useState<PhotoMeta[]>([]);
@@ -154,6 +215,8 @@ export default function DashboardPage() {
   // List states
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
+  // Storageパス → 署名付きURL のマップ（サムネイル表示用）
+  const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({});
   const [filterTab, setFilterTab] = useState<'all' | 'draft' | 'posted'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -174,6 +237,30 @@ export default function DashboardPage() {
   const [editReviewValue, setEditReviewValue] = useState('');
   const [savingReviewKey, setSavingReviewKey] = useState<string | null>(null);
 
+  // サムネイルの署名付きURLをまとめて取得するヘルパー（ベストエフォート。
+  // バケット未作成・取得失敗時は該当サムネイルが表示されないだけでカードは正常表示）
+  const loadThumbUrls = useCallback(async (paths: string[]) => {
+    if (paths.length === 0) return;
+    try {
+      const { data, error } = await supabase.storage
+        .from(THUMBS_BUCKET)
+        .createSignedUrls(paths, 3600);
+      if (error || !data) {
+        console.warn('Failed to create signed URLs for thumbnails:', error);
+        return;
+      }
+      setThumbUrls(prev => {
+        const next = { ...prev };
+        for (const item of data) {
+          if (item.path && item.signedUrl) next[item.path] = item.signedUrl;
+        }
+        return next;
+      });
+    } catch (err) {
+      console.warn('Failed to load thumbnail URLs:', err);
+    }
+  }, []);
+
   // Fetch reviews list
   const fetchReviews = useCallback(async (userId: string) => {
     setLoadingReviews(true);
@@ -188,13 +275,14 @@ export default function DashboardPage() {
         console.error('Error fetching reviews:', error);
       } else {
         setReviews(data || []);
+        loadThumbUrls((data || []).flatMap((r: Review) => r.photo_thumbs || []));
       }
     } catch (err: unknown) {
       console.error(err);
     } finally {
       setLoadingReviews(false);
     }
-  }, []);
+  }, [loadThumbUrls]);
 
   // Check authentication
   useEffect(() => {
@@ -399,57 +487,15 @@ export default function DashboardPage() {
       return;
     }
 
-    const resizePromises = newFiles.map(file => {
-      return new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = (event) => {
-          const img = new Image();
-          img.src = event.target?.result as string;
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 1200;
-            const MAX_HEIGHT = 1200;
-            let width = img.width;
-            let height = img.height;
-
-            if (width > height) {
-              if (width > MAX_WIDTH) {
-                height = Math.round((height * MAX_WIDTH) / width);
-                width = MAX_WIDTH;
-              }
-            } else {
-              if (height > MAX_HEIGHT) {
-                width = Math.round((width * MAX_HEIGHT) / height);
-                height = MAX_HEIGHT;
-              }
-            }
-
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) {
-              reject(new Error('Canvasコンテキストの取得に失敗しました'));
-              return;
-            }
-            ctx.drawImage(img, 0, 0, width, height);
-            
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-            resolve(dataUrl);
-          };
-          img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
-        };
-        reader.onerror = () => reject(new Error('ファイルの読み込みに失敗しました'));
-      });
-    });
-
     try {
-      const [base64s, metas] = await Promise.all([
-        Promise.all(resizePromises),
+      const [base64s, thumbs, metas] = await Promise.all([
+        Promise.all(newFiles.map(file => resizeImageFile(file, AI_IMAGE_MAX_EDGE, AI_IMAGE_QUALITY))),
+        Promise.all(newFiles.map(file => resizeImageFile(file, THUMB_MAX_EDGE, THUMB_QUALITY))),
         Promise.all(newFiles.map(file => extractPhotoMeta(file))),
       ]);
       const updatedMeta = [...photoMeta, ...metas];
       setPhotosBase64(prev => [...prev, ...base64s]);
+      setPhotoThumbsBase64(prev => [...prev, ...thumbs]);
       setPhotoMeta(updatedMeta);
       applyVisitDateFromPhotoMeta(updatedMeta);
 
@@ -468,6 +514,7 @@ export default function DashboardPage() {
   const handleRemovePhoto = (index: number) => {
     const updatedMeta = photoMeta.filter((_, i) => i !== index);
     setPhotosBase64(prev => prev.filter((_, i) => i !== index));
+    setPhotoThumbsBase64(prev => prev.filter((_, i) => i !== index));
     setPhotoMeta(updatedMeta);
     applyVisitDateFromPhotoMeta(updatedMeta);
 
@@ -482,6 +529,44 @@ export default function DashboardPage() {
         setShopNameAutoFilled(false);
         shopNameManuallyEditedRef.current = false;
       }
+    }
+  };
+
+  // サムネイルをStorageへ保存し、成功したパスをレコードに記録するヘルパー
+  // ベストエフォート: 失敗してもレビュー生成フローには影響させない
+  const uploadThumbnails = async (userId: string, reviewId: string, thumbs: string[]) => {
+    try {
+      const paths: string[] = [];
+      await Promise.all(thumbs.map(async (thumb, index) => {
+        const path = `${userId}/${reviewId}/${index}.jpg`;
+        const { error } = await supabase.storage
+          .from(THUMBS_BUCKET)
+          .upload(path, dataUrlToBlob(thumb), { contentType: 'image/jpeg', upsert: true });
+        if (error) {
+          console.warn('Failed to upload thumbnail:', error);
+          return;
+        }
+        paths.push(path);
+      }));
+
+      if (paths.length === 0) return;
+      paths.sort();
+
+      const { error: updateError } = await supabase
+        .from('tabelog_reviews')
+        .update({ photo_thumbs: paths })
+        .eq('id', reviewId);
+      if (updateError) {
+        console.warn('Failed to save thumbnail paths:', updateError);
+        return;
+      }
+
+      await loadThumbUrls(paths);
+      setReviews(prev =>
+        prev.map(r => (r.id === reviewId ? { ...r, photo_thumbs: paths } : r))
+      );
+    } catch (err) {
+      console.warn('Thumbnail upload skipped:', err);
     }
   };
 
@@ -538,6 +623,10 @@ export default function DashboardPage() {
 
       // Copy local variables to send in fetch
       const payloadImages = [...photosBase64];
+      const payloadThumbs = [...photoThumbsBase64];
+
+      // サムネイルの保存はAI生成と並行してベストエフォートで行う（awaitしない）
+      uploadThumbnails(user.id, insertedReview.id, payloadThumbs);
 
       // Clear input fields during processing
       setShopName('');
@@ -546,6 +635,7 @@ export default function DashboardPage() {
       setVisitTime('');
       setRawMemo('');
       setPhotosBase64([]);
+      setPhotoThumbsBase64([]);
       setPhotoMeta([]);
       setPlaceCandidates([]);
       setSelectedPlace(null);
@@ -634,7 +724,9 @@ export default function DashboardPage() {
   // Delete a review card
   const handleDeleteReview = async (reviewId: string) => {
     if (!confirm('この下書きを削除してもよろしいですか？')) return;
-    
+
+    const target = reviews.find(r => r.id === reviewId);
+
     try {
       const { error } = await supabase
         .from('tabelog_reviews')
@@ -644,6 +736,16 @@ export default function DashboardPage() {
       if (error) throw error;
 
       setReviews(prev => prev.filter(r => r.id !== reviewId));
+
+      // Storage上のサムネイルもベストエフォートで削除（失敗しても孤児として許容）
+      if (target?.photo_thumbs && target.photo_thumbs.length > 0) {
+        supabase.storage
+          .from(THUMBS_BUCKET)
+          .remove(target.photo_thumbs)
+          .then(({ error: removeError }) => {
+            if (removeError) console.warn('Failed to delete thumbnails:', removeError);
+          });
+      }
     } catch (err: unknown) {
       console.error('Failed to delete review:', err);
       alert(err instanceof Error ? err.message : '下書きの削除に失敗しました');
@@ -1313,6 +1415,23 @@ export default function DashboardPage() {
                       )}
                     </span>
                   </div>
+
+                  {review.photo_thumbs && review.photo_thumbs.some(path => thumbUrls[path]) && (
+                    <div className={styles.cardThumbs}>
+                      {review.photo_thumbs.map(path =>
+                        thumbUrls[path] ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            key={path}
+                            src={thumbUrls[path]}
+                            alt="料理の写真"
+                            className={styles.cardThumbImg}
+                            loading="lazy"
+                          />
+                        ) : null
+                      )}
+                    </div>
+                  )}
 
                   {review.raw_memo && (
                     <div className={styles.cardMemo}>
