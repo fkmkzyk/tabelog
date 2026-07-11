@@ -655,6 +655,21 @@
   color: var(--secondary);
 }
 
+.cardThumbs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.cardThumbImg {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.2);
+}
+
 .cardMemo {
   background: rgba(28, 25, 23, 0.4);
   border-left: 3px solid var(--text-muted);
