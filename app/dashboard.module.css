@@ -906,6 +906,11 @@
   color: var(--success) !important;
 }
 
+.gPostBtn {
+  border: 1px solid rgba(249, 115, 22, 0.35) !important;
+  color: var(--primary) !important;
+}
+
 @media (max-width: 600px) {
   .header {
     padding: 0.75rem 1rem;
@@ -945,6 +950,11 @@
 
   .rewriteBtn {
     order: -1;
+  }
+
+  /* ワンタップ投稿はモバイルでは最上部に配置 */
+  .gPostBtn {
+    order: -2;
   }
 }
 

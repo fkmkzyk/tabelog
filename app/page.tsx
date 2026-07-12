@@ -25,7 +25,8 @@ import {
   RefreshCw,
   Edit2,
   MapPin,
-  Wand2
+  Wand2,
+  ExternalLink
 } from 'lucide-react';
 
 interface Review {
@@ -43,6 +44,7 @@ interface Review {
   shop_location: string | null;
   latitude: number | null;
   longitude: number | null;
+  place_id: string | null;
   place_lat: number | null;
   place_lng: number | null;
   photo_thumbs: string[] | null;
@@ -1679,8 +1681,26 @@ export default function DashboardPage() {
                         {(() => {
                           const tabelogDone = review.status === 'posted_tabelog' || review.status === 'posted';
                           const googleDone = review.status === 'posted_google' || review.status === 'posted';
+                          const postComment = getReviewParts(review).comment;
                           return (
                             <>
+                              {review.place_id && postComment && (
+                                // ワンタップ投稿: コメントをコピーしつつ、Googleマップの
+                                // この店舗のクチコミ投稿画面を直接開く（place_id利用）。
+                                // アンカーのネイティブ遷移＋onClickコピーでポップアップ
+                                // ブロックとクリップボード権限の両方を確実に通す
+                                <a
+                                  href={`https://search.google.com/local/writereview?placeid=${encodeURIComponent(review.place_id)}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={() => handleCopyToClipboard(postComment, `${review.id}-gpost`)}
+                                  className={`${styles.platformPostBtn} ${styles.gPostBtn} btn btn-secondary`}
+                                  title="コメントをコピーして、Googleマップのこの店のクチコミ投稿画面を開く"
+                                >
+                                  <ExternalLink size={14} />
+                                  <span>{copiedId === `${review.id}-gpost` ? 'コメントをコピーして開きました' : 'Googleマップに投稿'}</span>
+                                </a>
+                              )}
                               <button
                                 onClick={() => handleTogglePlatformPosted(review.id, 'tabelog')}
                                 className={`${styles.platformPostBtn} btn btn-secondary ${tabelogDone ? styles.platformPostBtnDone : ''}`}
