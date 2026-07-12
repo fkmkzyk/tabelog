@@ -609,6 +609,64 @@
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
+/* Private memo (非公開の自分用メモ) */
+.privateMemoSection {
+  margin-top: 0.75rem;
+}
+
+.privateMemoBox {
+  border: 1px dashed rgba(120, 113, 108, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  background: rgba(28, 25, 23, 0.3);
+}
+
+.privateMemoHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.privateMemoLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.privateMemoText {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.addPrivateMemoBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: 1px dashed rgba(120, 113, 108, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.addPrivateMemoBtn:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
+
 /* Shop Identify (photos -> shop name & location) Feature Styles */
 .identifyBtn {
   width: 100%;

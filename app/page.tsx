@@ -27,7 +27,8 @@ import {
   MapPin,
   Wand2,
   ExternalLink,
-  History
+  History,
+  Lock
 } from 'lucide-react';
 
 interface Review {
@@ -49,6 +50,7 @@ interface Review {
   place_lat: number | null;
   place_lng: number | null;
   photo_thumbs: string[] | null;
+  private_memo: string | null;
 }
 
 // 写真1枚分のEXIFメタデータ（撮影日時・GPS。取得できなかった項目はnull）
@@ -273,6 +275,11 @@ export default function DashboardPage() {
   const [editingRatingId, setEditingRatingId] = useState<string | null>(null);
   const [editRatingValue, setEditRatingValue] = useState(3.0);
   const [savingRatingId, setSavingRatingId] = useState<string | null>(null);
+
+  // Private memo editing states（非公開の自分用メモ。投稿にもAIにも使わない）
+  const [editingPrivateMemoId, setEditingPrivateMemoId] = useState<string | null>(null);
+  const [editPrivateMemoValue, setEditPrivateMemoValue] = useState('');
+  const [savingPrivateMemoId, setSavingPrivateMemoId] = useState<string | null>(null);
 
   // サムネイルの署名付きURLをまとめて取得するヘルパー（ベストエフォート。
   // バケット未作成・取得失敗時は該当サムネイルが表示されないだけでカードは正常表示）
@@ -936,6 +943,43 @@ export default function DashboardPage() {
       alert(err instanceof Error ? err.message : '評価の更新に失敗しました');
     } finally {
       setSavingRatingId(null);
+    }
+  };
+
+  // Start private memo editing
+  const handleStartEditPrivateMemo = (review: Review) => {
+    setEditingPrivateMemoId(review.id);
+    setEditPrivateMemoValue(review.private_memo || '');
+  };
+
+  // Cancel private memo editing
+  const handleCancelEditPrivateMemo = () => {
+    setEditingPrivateMemoId(null);
+    setEditPrivateMemoValue('');
+  };
+
+  // Save the private memo (empty = delete the memo)
+  const handleSavePrivateMemo = async (reviewId: string) => {
+    const value = editPrivateMemoValue.trim() || null;
+    setSavingPrivateMemoId(reviewId);
+    try {
+      const { error } = await supabase
+        .from('tabelog_reviews')
+        .update({ private_memo: value })
+        .eq('id', reviewId);
+
+      if (error) throw error;
+
+      setReviews(prev =>
+        prev.map(r => (r.id === reviewId ? { ...r, private_memo: value } : r))
+      );
+      setEditingPrivateMemoId(null);
+      setEditPrivateMemoValue('');
+    } catch (err: unknown) {
+      console.error('Failed to update private memo:', err);
+      alert(err instanceof Error ? err.message : 'メモの更新に失敗しました');
+    } finally {
+      setSavingPrivateMemoId(null);
     }
   };
 
@@ -1787,6 +1831,74 @@ export default function DashboardPage() {
                   ) : (
                     <div className={styles.generatingPlaceholder} style={{ color: 'var(--danger)' }}>
                       生成に失敗しました。このカードを削除してやり直してください。
+                    </div>
+                  )}
+
+                  {/* Private memo（非公開の自分用メモ） */}
+                  {review.status !== 'processing' && (
+                    <div className={styles.privateMemoSection}>
+                      {editingPrivateMemoId === review.id ? (
+                        <div className={styles.reviewEditForm}>
+                          <textarea
+                            value={editPrivateMemoValue}
+                            onChange={(e) => setEditPrivateMemoValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') handleCancelEditPrivateMemo();
+                            }}
+                            rows={3}
+                            placeholder="例：次は塩ラーメンを頼む / 連れが海老アレルギー（この内容は投稿にもAIにも使われません）"
+                            className={styles.reviewEditTextarea}
+                            autoFocus
+                            disabled={savingPrivateMemoId === review.id}
+                          />
+                          <div className={styles.reviewEditActions}>
+                            <button
+                              onClick={() => handleSavePrivateMemo(review.id)}
+                              className="btn btn-primary btn-sm"
+                              disabled={savingPrivateMemoId === review.id}
+                            >
+                              {savingPrivateMemoId === review.id ? <Loader2 className={styles.spinner} size={12} /> : <Check size={12} />}
+                              <span>保存</span>
+                            </button>
+                            <button
+                              onClick={handleCancelEditPrivateMemo}
+                              className="btn btn-secondary btn-sm"
+                              disabled={savingPrivateMemoId === review.id}
+                            >
+                              <X size={12} />
+                              <span>キャンセル</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : review.private_memo ? (
+                        <div className={styles.privateMemoBox}>
+                          <div className={styles.privateMemoHeader}>
+                            <span className={styles.privateMemoLabel}>
+                              <Lock size={11} />
+                              自分用メモ（非公開）
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditPrivateMemo(review)}
+                              className={styles.miniCopyBtn}
+                              title="自分用メモを編集"
+                            >
+                              <Edit2 size={11} />
+                              <span>編集</span>
+                            </button>
+                          </div>
+                          <p className={styles.privateMemoText}>{review.private_memo}</p>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditPrivateMemo(review)}
+                          className={styles.addPrivateMemoBtn}
+                        >
+                          <Lock size={12} />
+                          <span>自分用メモを追加（非公開）</span>
+                        </button>
+                      )}
                     </div>
                   )}
 
