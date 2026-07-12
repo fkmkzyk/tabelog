@@ -260,6 +260,11 @@ export default function DashboardPage() {
   const [editReviewValue, setEditReviewValue] = useState('');
   const [savingReviewKey, setSavingReviewKey] = useState<string | null>(null);
 
+  // Rating inline editing states
+  const [editingRatingId, setEditingRatingId] = useState<string | null>(null);
+  const [editRatingValue, setEditRatingValue] = useState(3.0);
+  const [savingRatingId, setSavingRatingId] = useState<string | null>(null);
+
   // サムネイルの署名付きURLをまとめて取得するヘルパー（ベストエフォート。
   // バケット未作成・取得失敗時は該当サムネイルが表示されないだけでカードは正常表示）
   const loadThumbUrls = useCallback(async (paths: string[]) => {
@@ -858,6 +863,40 @@ export default function DashboardPage() {
     }
   };
 
+  // Start rating editing
+  const handleStartEditRating = (review: Review) => {
+    setEditingRatingId(review.id);
+    setEditRatingValue(Number(review.rating));
+  };
+
+  // Cancel rating editing
+  const handleCancelEditRating = () => {
+    setEditingRatingId(null);
+  };
+
+  // Save modified rating to Supabase
+  const handleSaveRating = async (reviewId: string) => {
+    setSavingRatingId(reviewId);
+    try {
+      const { error } = await supabase
+        .from('tabelog_reviews')
+        .update({ rating: editRatingValue })
+        .eq('id', reviewId);
+
+      if (error) throw error;
+
+      setReviews(prev =>
+        prev.map(r => (r.id === reviewId ? { ...r, rating: editRatingValue } : r))
+      );
+      setEditingRatingId(null);
+    } catch (err: unknown) {
+      console.error('Failed to update rating:', err);
+      alert(err instanceof Error ? err.message : '評価の更新に失敗しました');
+    } finally {
+      setSavingRatingId(null);
+    }
+  };
+
   // Resolve a review's current title/comment (structured columns first,
   // regex-parsed legacy text as fallback). Shared by render and edit handlers.
   const getReviewParts = useCallback((review: Review): { title: string; comment: string } => {
@@ -1333,10 +1372,61 @@ export default function DashboardPage() {
                         </div>
                       )}
                         <div className={styles.cardMeta}>
-                          <div className={styles.cardStars}>
-                            {renderStars(review.rating, 14)}
-                            <span className={styles.cardRatingValue}>{Number(review.rating).toFixed(1)}</span>
-                          </div>
+                          {editingRatingId === review.id ? (
+                            <div className={styles.editRatingForm}>
+                              {renderStars(editRatingValue, 14)}
+                              <input
+                                type="range"
+                                min="1.0"
+                                max="5.0"
+                                step="0.2"
+                                value={editRatingValue}
+                                onChange={(e) => setEditRatingValue(parseFloat(e.target.value))}
+                                className={`${styles.ratingSlider} ${styles.editRatingSlider}`}
+                                disabled={savingRatingId === review.id}
+                                aria-label="評価を変更"
+                              />
+                              <span className={styles.cardRatingValue}>{editRatingValue.toFixed(1)}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleSaveRating(review.id)}
+                                className={styles.saveShopNameBtn}
+                                disabled={savingRatingId === review.id}
+                                title="保存"
+                              >
+                                {savingRatingId === review.id ? (
+                                  <Loader2 className={styles.spinner} size={13} />
+                                ) : (
+                                  <Check size={13} />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleCancelEditRating}
+                                className={styles.cancelShopNameBtn}
+                                disabled={savingRatingId === review.id}
+                                title="キャンセル"
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className={styles.cardStars}>
+                              {renderStars(review.rating, 14)}
+                              <span className={styles.cardRatingValue}>{Number(review.rating).toFixed(1)}</span>
+                              {review.status !== 'processing' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditRating(review)}
+                                  className={styles.editShopNameBtn}
+                                  title="評価を編集"
+                                  aria-label="評価を編集"
+                                >
+                                  <Edit2 size={12} />
+                                </button>
+                              )}
+                            </div>
+                          )}
                           {review.visit_date && (
                             <>
                               <span className={styles.metaDivider}>|</span>

@@ -461,6 +461,18 @@
   gap: 0.15rem;
 }
 
+.editRatingForm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.editRatingSlider {
+  flex: none;
+  width: 90px;
+  min-width: 0;
+}
+
 .cardRatingValue {
   font-size: 0.75rem;
   font-weight: 700;
