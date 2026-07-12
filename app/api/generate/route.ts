@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyAuth } from '@/lib/auth';
-import { getGeminiModel, fileToGenerativePart, parseGeneratedReview, describeVisitDateTime } from '@/lib/gemini';
+import { getGeminiMultiDraftModel, fileToGenerativePart, parseGeneratedDrafts, describeVisitDateTime } from '@/lib/gemini';
 import { describeRevisit } from '@/lib/revisit';
 
 export async function POST(request: Request) {
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     const visitDesc = describeVisitDateTime(row.visit_date, row.visit_time);
     const revisitDesc = await describeRevisit(supabaseAdmin, user.id, row.place_id, review_id);
 
-    const model = getGeminiModel();
+    const model = getGeminiMultiDraftModel();
 
     // 3. Prepare Image Generative Parts
     let imageParts;
@@ -83,7 +83,11 @@ export async function POST(request: Request) {
 
 【厳守すべき指示】
 1. 出力形式:
-   レビューのタイトルを「title」フィールドに、コメント本文を「comment」フィールドに出力してください。
+   文体の異なるレビュー3案を「drafts」配列に出力してください（各案はタイトルを「title」、コメント本文を「comment」フィールドに）。
+   - 案1: 淡々と簡潔（事実中心・最もフラット）
+   - 案2: 料理の描写をやや多めに（見た目・食感など画像から確認できる範囲で）
+   - 案3: 少しカジュアルな一言感想風
+   3案とも、以下のすべてのルール（文字数・トーン・禁止事項）を守ってください。
 2. 文字数制限:
    コメント部分（本文）は130文字程度（目安100文字〜150文字程度）の簡潔な文章にしてください。
 3. トーン＆マナー:
@@ -112,11 +116,15 @@ ${raw_memo || 'なし'}
 `;
 
     const visionResult = await model.generateContent([visionPrompt, ...imageParts]);
-    const draft = parseGeneratedReview(visionResult.response.text());
+    const drafts = parseGeneratedDrafts(visionResult.response.text());
 
     // 5. Step 2: AI Prompt (Censorship & Hallucination Filter)
+    const draftsText = drafts
+      .map((d, i) => `案${i + 1}:\nタイトル: ${d.title}\nコメント: ${d.comment}`)
+      .join('\n\n');
+
     const censorshipPrompt = `
-あなたは極めて厳格なレビュー検閲官です。前段のAIが作成した【生成レビュー下書き】と、ユーザーの【体験メモ】を対比し、以下の検閲・修正ルールに従って最終的なレビュー文を修正してください。
+あなたは極めて厳格なレビュー検閲官です。前段のAIが作成した【生成レビュー下書き（${drafts.length}案）】と、ユーザーの【体験メモ】を対比し、以下の検閲・修正ルールに従って**すべての案を**修正してください。
 
 【検閲・修正ルール】
 1. 文字数の調整: コメント（本文）の部分が130文字程度になっていることを確認してください。長すぎる場合は簡潔に削り、短すぎる場合は画像の特徴に基づく自然な描写を少し補ってください。
@@ -129,17 +137,12 @@ ${raw_memo || 'なし'}
    - コメントが「◯月に」「〜頃に」「先日」「休日の夜に」など訪問時期・時間帯の表現から始まっている場合は、料理や体験の内容から始まる書き出しに必ず修正してください（時期への言及は文中に移すか削除）。
 
 【出力ルール】
-検閲と修正を完了した、最終的な安全な食べログ用レビューのタイトルを「title」フィールドに、コメント本文を「comment」フィールドに出力してください。挨拶、説明、修正履歴などは一切含めないでください。
+検閲と修正を完了した、最終的な安全な食べログ用レビューを、入力と同じ順序・同じ案数で「drafts」配列に出力してください（各案はタイトルを「title」、コメント本文を「comment」フィールドに）。挨拶、説明、修正履歴などは一切含めないでください。
 
 【入力データ】
-生成レビュー下書きのタイトル:
+生成レビュー下書き（${drafts.length}案）:
 """
-${draft.title}
-"""
-
-生成レビュー下書きのコメント:
-"""
-${draft.comment}
+${draftsText}
 """
 
 訪問日時（確認済みの事実）: ${visitDesc || '不明'}
@@ -152,16 +155,19 @@ ${raw_memo || 'なし'}
 `;
 
     const censorshipResult = await model.generateContent(censorshipPrompt);
-    const finalReview = parseGeneratedReview(censorshipResult.response.text());
+    const finalDrafts = parseGeneratedDrafts(censorshipResult.response.text());
+    const primary = finalDrafts[0];
 
     // 6. Step 3: Write back to Supabase
+    // review_title/comment hold the currently selected draft (initially 案1);
     // generated_review keeps the legacy canonical text format for backward compatibility.
     const { error: updateError } = await supabaseAdmin
       .from('tabelog_reviews')
       .update({
-        generated_review: `タイトル：${finalReview.title}\nコメント：${finalReview.comment}`,
-        review_title: finalReview.title,
-        review_comment: finalReview.comment,
+        generated_review: `タイトル：${primary.title}\nコメント：${primary.comment}`,
+        review_title: primary.title,
+        review_comment: primary.comment,
+        review_drafts: finalDrafts,
         status: 'draft',
       } as unknown as never)
       .eq('id', review_id);
@@ -172,8 +178,9 @@ ${raw_memo || 'なし'}
 
     return NextResponse.json({
       success: true,
-      review_title: finalReview.title,
-      review_comment: finalReview.comment,
+      review_title: primary.title,
+      review_comment: primary.comment,
+      review_drafts: finalDrafts,
     });
 
   } catch (error: unknown) {

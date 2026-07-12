@@ -72,6 +72,7 @@ interface Review {
   place_lng: number | null;
   photo_thumbs: string[] | null;
   private_memo: string | null;
+  review_drafts: { title: string; comment: string }[] | null;
 }
 
 // 写真1枚分のEXIFメタデータ（撮影日時・GPS。取得できなかった項目はnull）
@@ -296,6 +297,9 @@ export default function DashboardPage() {
   const [editingRatingId, setEditingRatingId] = useState<string | null>(null);
   const [editRatingValue, setEditRatingValue] = useState(3.0);
   const [savingRatingId, setSavingRatingId] = useState<string | null>(null);
+
+  // Multi-draft selection state（案チップ切替中のレビューID）
+  const [selectingDraftId, setSelectingDraftId] = useState<string | null>(null);
 
   // Private memo editing states（非公開の自分用メモ。投稿にもAIにも使わない）
   const [editingPrivateMemoId, setEditingPrivateMemoId] = useState<string | null>(null);
@@ -1138,6 +1142,44 @@ export default function DashboardPage() {
     }
   };
 
+  // 案チップの選択: 選んだ下書き案をレビューの表示・保存内容に反映する
+  const handleSelectDraft = async (review: Review, index: number) => {
+    const draft = review.review_drafts?.[index];
+    if (!draft) return;
+
+    setSelectingDraftId(review.id);
+    try {
+      const { error } = await supabase
+        .from('tabelog_reviews')
+        .update({
+          review_title: draft.title,
+          review_comment: draft.comment,
+          generated_review: `タイトル：${draft.title}\nコメント：${draft.comment}`,
+        })
+        .eq('id', review.id);
+
+      if (error) throw error;
+
+      setReviews(prev =>
+        prev.map(r =>
+          r.id === review.id
+            ? {
+                ...r,
+                review_title: draft.title,
+                review_comment: draft.comment,
+                generated_review: `タイトル：${draft.title}\nコメント：${draft.comment}`,
+              }
+            : r
+        )
+      );
+    } catch (err: unknown) {
+      console.error('Failed to select draft:', err);
+      alert(err instanceof Error ? err.message : '案の切り替えに失敗しました');
+    } finally {
+      setSelectingDraftId(null);
+    }
+  };
+
   // Copy to clipboard helper
   const handleCopyToClipboard = (text: string, copyKey: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -1763,6 +1805,27 @@ export default function DashboardPage() {
                     const editingComment = editingReviewKey === commentKey;
                     return (
                       <div className={styles.cardReviewText}>
+                        {review.review_drafts && review.review_drafts.length > 1 && review.status !== 'posted' && (
+                          <div className={styles.draftChips}>
+                            <span className={styles.draftChipsLabel}>下書き案:</span>
+                            {review.review_drafts.map((d, i) => {
+                              const active = d.title === title && d.comment === comment;
+                              return (
+                                <button
+                                  type="button"
+                                  key={i}
+                                  onClick={() => handleSelectDraft(review, i)}
+                                  className={`${styles.draftChip} ${active ? styles.draftChipActive : ''}`}
+                                  disabled={selectingDraftId !== null || active}
+                                  title={d.title}
+                                >
+                                  案{i + 1}
+                                </button>
+                              );
+                            })}
+                            {selectingDraftId === review.id && <Loader2 className={styles.spinner} size={13} />}
+                          </div>
+                        )}
                         {title && (
                           <div className={styles.reviewSection}>
                             <div className={styles.reviewSectionHeader}>
