@@ -589,6 +589,26 @@
   flex-shrink: 0;
 }
 
+.revisitNote {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+.revisitMemo {
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: rgba(28, 25, 23, 0.4);
+  border-left: 2px solid var(--secondary);
+  padding: 0.35rem 0.6rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
 /* Shop Identify (photos -> shop name & location) Feature Styles */
 .identifyBtn {
   width: 100%;

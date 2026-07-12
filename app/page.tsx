@@ -26,7 +26,8 @@ import {
   Edit2,
   MapPin,
   Wand2,
-  ExternalLink
+  ExternalLink,
+  History
 } from 'lucide-react';
 
 interface Review {
@@ -227,6 +228,14 @@ export default function DashboardPage() {
   // Set once the user types the shop name manually; blocks async auto-fill races
   const shopNameManuallyEditedRef = useRef(false);
 
+  // Revisit detection: info about past visits to the selected place
+  const [revisitInfo, setRevisitInfo] = useState<{
+    visitCount: number;
+    lastRating: number | null;
+    lastVisitDate: string | null;
+    lastPrivateMemo: string | null;
+  } | null>(null);
+
   // AI shop identification states (photos -> shop name & location via Gemini)
   const [shopLocation, setShopLocation] = useState('');
   const [identifying, setIdentifying] = useState(false);
@@ -419,11 +428,40 @@ export default function DashboardPage() {
         setShopNameAutoFilled(true);
         // 正確な住所（Google Places由来）で場所欄も補完する（空欄のみ）
         setShopLocation(prev => prev.trim() ? prev : candidates[0].address);
+        checkRevisit(candidates[0].placeId);
       }
     } catch (err) {
       console.warn('Failed to fetch place candidates:', err);
     } finally {
       setPlacesLoading(false);
+    }
+  };
+
+  // 選択された店舗（place_id）への過去の訪問を検索し、再訪情報を表示する
+  // ベストエフォート: 失敗しても投稿フローには影響しない
+  const checkRevisit = async (placeId: string) => {
+    try {
+      const { data, count, error } = await supabase
+        .from('tabelog_reviews')
+        .select('rating, visit_date, private_memo', { count: 'exact' })
+        .eq('place_id', placeId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error || !count || count === 0) {
+        setRevisitInfo(null);
+        return;
+      }
+      const last = data?.[0] as unknown as { rating: number; visit_date: string | null; private_memo: string | null } | undefined;
+      setRevisitInfo({
+        visitCount: count + 1,
+        lastRating: last ? Number(last.rating) : null,
+        lastVisitDate: last?.visit_date ?? null,
+        lastPrivateMemo: last?.private_memo ?? null,
+      });
+    } catch (err) {
+      console.warn('Failed to check revisit:', err);
+      setRevisitInfo(null);
     }
   };
 
@@ -433,6 +471,7 @@ export default function DashboardPage() {
     shopNameManuallyEditedRef.current = true;
     setShopNameAutoFilled(false);
     setSelectedPlace(null);
+    setRevisitInfo(null);
   };
 
   // 候補チップの選択
@@ -443,6 +482,7 @@ export default function DashboardPage() {
     shopNameManuallyEditedRef.current = false;
     // 場所欄が空なら候補の住所で補完する（入力済みの場所は上書きしない）
     setShopLocation(prev => prev.trim() ? prev : candidate.address);
+    checkRevisit(candidate.placeId);
   };
 
   // 写真からお店の名前と場所をAI（Gemini Vision）で推定し、フォームに反映する
@@ -556,6 +596,7 @@ export default function DashboardPage() {
         setSelectedPlace(null);
         setShopNameAutoFilled(false);
         shopNameManuallyEditedRef.current = false;
+        setRevisitInfo(null);
       }
     }
   };
@@ -671,6 +712,7 @@ export default function DashboardPage() {
       shopNameManuallyEditedRef.current = false;
       setShopLocation('');
       setIdentifyNote(null);
+      setRevisitInfo(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       // 2. Fetch session and tokens
@@ -1100,6 +1142,21 @@ export default function DashboardPage() {
                       </button>
                     ))}
                   </div>
+                )}
+                {revisitInfo && (
+                  <div className={styles.revisitNote}>
+                    <History size={12} />
+                    <span>
+                      この店は{revisitInfo.visitCount}回目の訪問です
+                      {revisitInfo.lastRating != null && (
+                        <>（前回: ★{revisitInfo.lastRating.toFixed(1)}
+                        {revisitInfo.lastVisitDate && `・${new Date(revisitInfo.lastVisitDate).toLocaleDateString('ja-JP')}`}）</>
+                      )}
+                    </span>
+                  </div>
+                )}
+                {revisitInfo?.lastPrivateMemo && (
+                  <div className={styles.revisitMemo}>前回の自分用メモ: {revisitInfo.lastPrivateMemo}</div>
                 )}
               </div>
 
