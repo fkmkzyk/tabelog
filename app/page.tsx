@@ -126,6 +126,27 @@ const resizeImageFile = (file: File, maxEdge: number, quality: number): Promise<
   });
 };
 
+// テキストを同期的にクリップボードへコピーするヘルパー。
+// 非同期のnavigator.clipboardはページ遷移（新規タブが開く等）と競合すると
+// 失敗することがあるため、遷移を伴うボタンでは同期のexecCommandを優先する
+const copyTextSync = (text: string): boolean => {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length); // iOS Safari対応
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+};
+
 // dataURL（JPEG）をStorageアップロード用のBlobへ変換するヘルパー
 const dataUrlToBlob = (dataUrl: string): Blob => {
   const base64 = dataUrl.split(',')[1];
@@ -1687,13 +1708,32 @@ export default function DashboardPage() {
                               {review.place_id && postComment && (
                                 // ワンタップ投稿: コメントをコピーしつつ、Googleマップの
                                 // この店舗のクチコミ投稿画面を直接開く（place_id利用）。
-                                // アンカーのネイティブ遷移＋onClickコピーでポップアップ
-                                // ブロックとクリップボード権限の両方を確実に通す
+                                // コピーは同期APIを優先し、成功した場合のみアンカーの
+                                // ネイティブ遷移に任せる。同期コピーが失敗した場合は
+                                // 遷移を止めて非同期APIで再試行し、コピーできてから開く
+                                // （未コピーのまま投稿画面だけが開く事故を防ぐ）
                                 <a
                                   href={`https://search.google.com/local/writereview?placeid=${encodeURIComponent(review.place_id)}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  onClick={() => handleCopyToClipboard(postComment, `${review.id}-gpost`)}
+                                  onClick={async (e) => {
+                                    const url = e.currentTarget.href;
+                                    if (copyTextSync(postComment)) {
+                                      setCopiedId(`${review.id}-gpost`);
+                                      setTimeout(() => setCopiedId(null), 2000);
+                                      return; // ネイティブ遷移に任せる
+                                    }
+                                    e.preventDefault();
+                                    try {
+                                      await navigator.clipboard.writeText(postComment);
+                                      setCopiedId(`${review.id}-gpost`);
+                                      setTimeout(() => setCopiedId(null), 2000);
+                                      const opened = window.open(url, '_blank', 'noopener,noreferrer');
+                                      if (!opened) window.location.assign(url); // ポップアップブロック時は同タブで開く
+                                    } catch {
+                                      alert('コメントのコピーに失敗しました。コメント欄の「コピー」ボタンでコピーしてから、もう一度お試しください。');
+                                    }
+                                  }}
                                   className={`${styles.platformPostBtn} ${styles.gPostBtn} btn btn-secondary`}
                                   title="コメントをコピーして、Googleマップのこの店のクチコミ投稿画面を開く"
                                 >
