@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
@@ -28,8 +28,29 @@ import {
   Wand2,
   ExternalLink,
   History,
-  Lock
+  Lock,
+  Mic
 } from 'lucide-react';
+
+// Web Speech API の最小型定義（TypeScript標準に含まれないため）
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: { isFinal: boolean; 0: { transcript: string } };
+  };
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
 
 interface Review {
   id: string;
@@ -281,6 +302,22 @@ export default function DashboardPage() {
   const [editPrivateMemoValue, setEditPrivateMemoValue] = useState('');
   const [savingPrivateMemoId, setSavingPrivateMemoId] = useState<string | null>(null);
 
+  // Voice memo input states (Web Speech API)
+  // SSR時はfalse、クライアントでブラウザ対応を判定（ハイドレーション安全）
+  const speechSupported = useSyncExternalStore(
+    () => () => {},
+    () => {
+      const w = window as unknown as {
+        SpeechRecognition?: SpeechRecognitionCtor;
+        webkitSpeechRecognition?: SpeechRecognitionCtor;
+      };
+      return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
+    },
+    () => false,
+  );
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+
   // サムネイルの署名付きURLをまとめて取得するヘルパー（ベストエフォート。
   // バケット未作成・取得失敗時は該当サムネイルが表示されないだけでカードは正常表示）
   const loadThumbUrls = useCallback(async (paths: string[]) => {
@@ -343,6 +380,54 @@ export default function DashboardPage() {
 
     checkAuth();
   }, [router, fetchReviews]);
+
+  // アンマウント時に音声認識を停止する
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+    };
+  }, []);
+
+  // 音声入力の開始/停止トグル。確定した発話を体験メモに箇条書きで追記する
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const w = window as unknown as {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!Ctor) return;
+
+    const recognition = new Ctor();
+    recognition.lang = 'ja-JP';
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event) => {
+      let text = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) text += event.results[i][0].transcript;
+      }
+      text = text.trim();
+      if (text) {
+        setRawMemo(prev => (prev.trim() ? `${prev.trimEnd()}\n・${text}` : `・${text}`));
+      }
+    };
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
+    }
+  };
 
   // Logout handler
   const handleLogout = async () => {
@@ -649,6 +734,7 @@ export default function DashboardPage() {
   // Submit and trigger API route
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    recognitionRef.current?.stop();
     if (!user) {
       setFormError('ユーザー情報が取得できません。再ログインしてください。');
       return;
@@ -1330,7 +1416,21 @@ export default function DashboardPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">体験メモ（任意・事実ベース）</label>
+                <div className={styles.memoLabelRow}>
+                  <label className="form-label">体験メモ（任意・事実ベース）</label>
+                  {speechSupported && (
+                    <button
+                      type="button"
+                      onClick={toggleVoiceInput}
+                      disabled={generating}
+                      className={`${styles.voiceBtn} ${isListening ? styles.voiceBtnActive : ''}`}
+                      title={isListening ? '音声入力を停止' : '音声でメモを入力'}
+                    >
+                      <Mic size={13} />
+                      <span>{isListening ? '聞き取り中… タップで停止' : '音声入力'}</span>
+                    </button>
+                  )}
+                </div>
                 <textarea
                   placeholder="例：
 ・ローストビーフが美味しかった
