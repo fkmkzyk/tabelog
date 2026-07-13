@@ -29,7 +29,8 @@ import {
   ExternalLink,
   History,
   Lock,
-  Mic
+  Mic,
+  Search
 } from 'lucide-react';
 
 // Web Speech API の最小型定義（TypeScript標準に含まれないため）
@@ -275,6 +276,9 @@ export default function DashboardPage() {
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({});
   const [filterTab, setFilterTab] = useState<'all' | 'draft' | 'posted'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // List search & sort states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortKey, setSortKey] = useState<'created_desc' | 'visit_desc' | 'rating_desc' | 'rating_asc'>('created_desc');
 
   // Rewrite states
   const [openRewriteId, setOpenRewriteId] = useState<string | null>(null);
@@ -1214,19 +1218,43 @@ export default function DashboardPage() {
     return { all: reviews.length, draft, posted };
   }, [reviews]);
 
-  // Memoized filtered reviews
+  // Memoized filtered & sorted reviews（タブ → 検索 → 並べ替えの順に適用）
   const filteredReviews = useMemo(() => {
-    if (filterTab === 'all') return reviews;
+    let result = reviews;
+
     if (filterTab === 'draft') {
-      return reviews.filter(r =>
+      result = result.filter(r =>
         r.status === 'draft' || r.status === 'failed' || r.status === 'posted_tabelog' || r.status === 'posted_google'
       );
+    } else if (filterTab === 'posted') {
+      result = result.filter(r => r.status === 'posted');
     }
-    if (filterTab === 'posted') {
-      return reviews.filter(r => r.status === 'posted');
+
+    const query = searchQuery.trim().toLowerCase();
+    if (query) {
+      result = result.filter(r =>
+        r.shop_name.toLowerCase().includes(query) ||
+        (r.shop_location || '').toLowerCase().includes(query)
+      );
     }
-    return reviews;
-  }, [reviews, filterTab]);
+
+    if (sortKey === 'created_desc') return result;
+
+    // 訪問日は未設定のレコードがあるため、作成日時をフォールバックに使う
+    const visitTime = (r: Review) =>
+      r.visit_date ? Date.parse(r.visit_date) : Date.parse(r.created_at);
+    const createdTime = (r: Review) => Date.parse(r.created_at);
+
+    const sorted = [...result];
+    if (sortKey === 'visit_desc') {
+      sorted.sort((a, b) => visitTime(b) - visitTime(a) || createdTime(b) - createdTime(a));
+    } else if (sortKey === 'rating_desc') {
+      sorted.sort((a, b) => Number(b.rating) - Number(a.rating) || createdTime(b) - createdTime(a));
+    } else if (sortKey === 'rating_asc') {
+      sorted.sort((a, b) => Number(a.rating) - Number(b.rating) || createdTime(b) - createdTime(a));
+    }
+    return sorted;
+  }, [reviews, filterTab, searchQuery, sortKey]);
 
   if (loadingUser) {
     return (
@@ -1534,6 +1562,31 @@ export default function DashboardPage() {
             </button>
           </div>
 
+          <div className={styles.listControls}>
+            <div className={styles.searchBox}>
+              <Search size={14} className={styles.searchIcon} />
+              <input
+                type="search"
+                placeholder="店舗名・場所で検索"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={styles.searchInput}
+                aria-label="レビューを検索"
+              />
+            </div>
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as typeof sortKey)}
+              className={styles.sortSelect}
+              aria-label="並べ替え"
+            >
+              <option value="created_desc">作成が新しい順</option>
+              <option value="visit_desc">訪問日が新しい順</option>
+              <option value="rating_desc">評価が高い順</option>
+              <option value="rating_asc">評価が低い順</option>
+            </select>
+          </div>
+
           <div className={styles.reviewList}>
             {loadingReviews && reviews.length === 0 ? (
               <div className={styles.listEmptyState}>
@@ -1543,7 +1596,7 @@ export default function DashboardPage() {
             ) : filteredReviews.length === 0 ? (
               <div className={`${styles.listEmptyState} glass-card`}>
                 <FileText size={40} className={styles.emptyIcon} />
-                <p>対象のレビューはありません。</p>
+                <p>{searchQuery.trim() ? `「${searchQuery.trim()}」に一致するレビューはありません。` : '対象のレビューはありません。'}</p>
               </div>
             ) : (
               filteredReviews.map((review) => (
