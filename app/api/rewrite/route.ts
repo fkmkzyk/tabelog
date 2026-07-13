@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { verifyAuth } from '@/lib/auth';
 import { getGeminiModel, parseGeneratedReview, describeVisitDateTime } from '@/lib/gemini';
+import { describeRevisit } from '@/lib/revisit';
 
 export async function POST(request: Request) {
   try {
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Review not found' }, { status: 404 });
     }
 
-    const row = reviewData as unknown as { user_id: string; shop_name: string; rating: number; raw_memo: string | null; generated_review: string | null; review_title: string | null; review_comment: string | null; visit_date: string | null; visit_time: string | null; place_genre: string | null };
+    const row = reviewData as unknown as { user_id: string; shop_name: string; rating: number; raw_memo: string | null; generated_review: string | null; review_title: string | null; review_comment: string | null; visit_date: string | null; visit_time: string | null; place_genre: string | null; place_id: string | null };
 
     if (row.user_id !== user.id) {
       return NextResponse.json({ error: 'Forbidden: You do not own this review' }, { status: 403 });
@@ -72,6 +73,7 @@ export async function POST(request: Request) {
 店舗ジャンル: ${row.place_genre || '不明'}
 評価（星5段階）: ${rating}
 訪問日時（確認済みの事実。季節や時間帯の文脈として自然に活かして良い）: ${describeVisitDateTime(row.visit_date, row.visit_time) || '不明'}
+再訪情報（確認済みの事実。再訪への自然な言及は維持して良い）: ${await describeRevisit(supabaseAdmin, user.id, row.place_id, review_id) || '初訪問（過去の記録なし）'}
 ユーザーの元の体験メモ:
 """
 ${rawMemo || 'なし'}

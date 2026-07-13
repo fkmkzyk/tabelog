@@ -589,6 +589,171 @@
   flex-shrink: 0;
 }
 
+.revisitNote {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+.revisitMemo {
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: rgba(28, 25, 23, 0.4);
+  border-left: 2px solid var(--secondary);
+  padding: 0.35rem 0.6rem;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* Private memo (非公開の自分用メモ) */
+.privateMemoSection {
+  margin-top: 0.75rem;
+}
+
+.privateMemoBox {
+  border: 1px dashed rgba(120, 113, 108, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  background: rgba(28, 25, 23, 0.3);
+}
+
+.privateMemoHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.privateMemoLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.privateMemoText {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.addPrivateMemoBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: 1px dashed rgba(120, 113, 108, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.addPrivateMemoBtn:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
+
+/* Multi-draft chips */
+.draftChips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.draftChipsLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.draftChip {
+  background: rgba(28, 25, 23, 0.6);
+  border: 1px solid var(--glass-border);
+  border-radius: 50px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.draftChip:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--text-primary);
+}
+
+.draftChip:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.draftChipActive {
+  background: var(--primary-glow);
+  border-color: var(--primary);
+  color: var(--primary);
+  opacity: 1 !important;
+}
+
+/* Voice memo input */
+.memoLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.voiceBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(250, 250, 249, 0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 50px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.25rem 0.65rem;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  flex-shrink: 0;
+}
+
+.voiceBtn:hover {
+  color: var(--text-primary);
+  border-color: rgba(250, 250, 249, 0.2);
+}
+
+.voiceBtnActive {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.08);
+  animation: voicePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes voicePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.25); }
+  50% { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
+}
+
 /* Shop Identify (photos -> shop name & location) Feature Styles */
 .identifyBtn {
   width: 100%;

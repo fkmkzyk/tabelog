@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
@@ -26,8 +26,31 @@ import {
   Edit2,
   MapPin,
   Wand2,
-  ExternalLink
+  ExternalLink,
+  History,
+  Lock,
+  Mic
 } from 'lucide-react';
+
+// Web Speech API の最小型定義（TypeScript標準に含まれないため）
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: { isFinal: boolean; 0: { transcript: string } };
+  };
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
 
 interface Review {
   id: string;
@@ -48,6 +71,8 @@ interface Review {
   place_lat: number | null;
   place_lng: number | null;
   photo_thumbs: string[] | null;
+  private_memo: string | null;
+  review_drafts: { title: string; comment: string }[] | null;
 }
 
 // 写真1枚分のEXIFメタデータ（撮影日時・GPS。取得できなかった項目はnull）
@@ -227,6 +252,14 @@ export default function DashboardPage() {
   // Set once the user types the shop name manually; blocks async auto-fill races
   const shopNameManuallyEditedRef = useRef(false);
 
+  // Revisit detection: info about past visits to the selected place
+  const [revisitInfo, setRevisitInfo] = useState<{
+    visitCount: number;
+    lastRating: number | null;
+    lastVisitDate: string | null;
+    lastPrivateMemo: string | null;
+  } | null>(null);
+
   // AI shop identification states (photos -> shop name & location via Gemini)
   const [shopLocation, setShopLocation] = useState('');
   const [identifying, setIdentifying] = useState(false);
@@ -264,6 +297,30 @@ export default function DashboardPage() {
   const [editingRatingId, setEditingRatingId] = useState<string | null>(null);
   const [editRatingValue, setEditRatingValue] = useState(3.0);
   const [savingRatingId, setSavingRatingId] = useState<string | null>(null);
+
+  // Multi-draft selection state（案チップ切替中のレビューID）
+  const [selectingDraftId, setSelectingDraftId] = useState<string | null>(null);
+
+  // Private memo editing states（非公開の自分用メモ。投稿にもAIにも使わない）
+  const [editingPrivateMemoId, setEditingPrivateMemoId] = useState<string | null>(null);
+  const [editPrivateMemoValue, setEditPrivateMemoValue] = useState('');
+  const [savingPrivateMemoId, setSavingPrivateMemoId] = useState<string | null>(null);
+
+  // Voice memo input states (Web Speech API)
+  // SSR時はfalse、クライアントでブラウザ対応を判定（ハイドレーション安全）
+  const speechSupported = useSyncExternalStore(
+    () => () => {},
+    () => {
+      const w = window as unknown as {
+        SpeechRecognition?: SpeechRecognitionCtor;
+        webkitSpeechRecognition?: SpeechRecognitionCtor;
+      };
+      return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
+    },
+    () => false,
+  );
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   // サムネイルの署名付きURLをまとめて取得するヘルパー（ベストエフォート。
   // バケット未作成・取得失敗時は該当サムネイルが表示されないだけでカードは正常表示）
@@ -327,6 +384,54 @@ export default function DashboardPage() {
 
     checkAuth();
   }, [router, fetchReviews]);
+
+  // アンマウント時に音声認識を停止する
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+    };
+  }, []);
+
+  // 音声入力の開始/停止トグル。確定した発話を体験メモに箇条書きで追記する
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const w = window as unknown as {
+      SpeechRecognition?: SpeechRecognitionCtor;
+      webkitSpeechRecognition?: SpeechRecognitionCtor;
+    };
+    const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!Ctor) return;
+
+    const recognition = new Ctor();
+    recognition.lang = 'ja-JP';
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event) => {
+      let text = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) text += event.results[i][0].transcript;
+      }
+      text = text.trim();
+      if (text) {
+        setRawMemo(prev => (prev.trim() ? `${prev.trimEnd()}\n・${text}` : `・${text}`));
+      }
+    };
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
+    }
+  };
 
   // Logout handler
   const handleLogout = async () => {
@@ -419,11 +524,40 @@ export default function DashboardPage() {
         setShopNameAutoFilled(true);
         // 正確な住所（Google Places由来）で場所欄も補完する（空欄のみ）
         setShopLocation(prev => prev.trim() ? prev : candidates[0].address);
+        checkRevisit(candidates[0].placeId);
       }
     } catch (err) {
       console.warn('Failed to fetch place candidates:', err);
     } finally {
       setPlacesLoading(false);
+    }
+  };
+
+  // 選択された店舗（place_id）への過去の訪問を検索し、再訪情報を表示する
+  // ベストエフォート: 失敗しても投稿フローには影響しない
+  const checkRevisit = async (placeId: string) => {
+    try {
+      const { data, count, error } = await supabase
+        .from('tabelog_reviews')
+        .select('rating, visit_date, private_memo', { count: 'exact' })
+        .eq('place_id', placeId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error || !count || count === 0) {
+        setRevisitInfo(null);
+        return;
+      }
+      const last = data?.[0] as unknown as { rating: number; visit_date: string | null; private_memo: string | null } | undefined;
+      setRevisitInfo({
+        visitCount: count + 1,
+        lastRating: last ? Number(last.rating) : null,
+        lastVisitDate: last?.visit_date ?? null,
+        lastPrivateMemo: last?.private_memo ?? null,
+      });
+    } catch (err) {
+      console.warn('Failed to check revisit:', err);
+      setRevisitInfo(null);
     }
   };
 
@@ -433,6 +567,7 @@ export default function DashboardPage() {
     shopNameManuallyEditedRef.current = true;
     setShopNameAutoFilled(false);
     setSelectedPlace(null);
+    setRevisitInfo(null);
   };
 
   // 候補チップの選択
@@ -443,6 +578,7 @@ export default function DashboardPage() {
     shopNameManuallyEditedRef.current = false;
     // 場所欄が空なら候補の住所で補完する（入力済みの場所は上書きしない）
     setShopLocation(prev => prev.trim() ? prev : candidate.address);
+    checkRevisit(candidate.placeId);
   };
 
   // 写真からお店の名前と場所をAI（Gemini Vision）で推定し、フォームに反映する
@@ -556,6 +692,7 @@ export default function DashboardPage() {
         setSelectedPlace(null);
         setShopNameAutoFilled(false);
         shopNameManuallyEditedRef.current = false;
+        setRevisitInfo(null);
       }
     }
   };
@@ -601,6 +738,7 @@ export default function DashboardPage() {
   // Submit and trigger API route
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    recognitionRef.current?.stop();
     if (!user) {
       setFormError('ユーザー情報が取得できません。再ログインしてください。');
       return;
@@ -671,6 +809,7 @@ export default function DashboardPage() {
       shopNameManuallyEditedRef.current = false;
       setShopLocation('');
       setIdentifyNote(null);
+      setRevisitInfo(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       // 2. Fetch session and tokens
@@ -897,6 +1036,43 @@ export default function DashboardPage() {
     }
   };
 
+  // Start private memo editing
+  const handleStartEditPrivateMemo = (review: Review) => {
+    setEditingPrivateMemoId(review.id);
+    setEditPrivateMemoValue(review.private_memo || '');
+  };
+
+  // Cancel private memo editing
+  const handleCancelEditPrivateMemo = () => {
+    setEditingPrivateMemoId(null);
+    setEditPrivateMemoValue('');
+  };
+
+  // Save the private memo (empty = delete the memo)
+  const handleSavePrivateMemo = async (reviewId: string) => {
+    const value = editPrivateMemoValue.trim() || null;
+    setSavingPrivateMemoId(reviewId);
+    try {
+      const { error } = await supabase
+        .from('tabelog_reviews')
+        .update({ private_memo: value })
+        .eq('id', reviewId);
+
+      if (error) throw error;
+
+      setReviews(prev =>
+        prev.map(r => (r.id === reviewId ? { ...r, private_memo: value } : r))
+      );
+      setEditingPrivateMemoId(null);
+      setEditPrivateMemoValue('');
+    } catch (err: unknown) {
+      console.error('Failed to update private memo:', err);
+      alert(err instanceof Error ? err.message : 'メモの更新に失敗しました');
+    } finally {
+      setSavingPrivateMemoId(null);
+    }
+  };
+
   // Resolve a review's current title/comment (structured columns first,
   // regex-parsed legacy text as fallback). Shared by render and edit handlers.
   const getReviewParts = useCallback((review: Review): { title: string; comment: string } => {
@@ -963,6 +1139,44 @@ export default function DashboardPage() {
       alert(err instanceof Error ? err.message : 'レビューの更新に失敗しました');
     } finally {
       setSavingReviewKey(null);
+    }
+  };
+
+  // 案チップの選択: 選んだ下書き案をレビューの表示・保存内容に反映する
+  const handleSelectDraft = async (review: Review, index: number) => {
+    const draft = review.review_drafts?.[index];
+    if (!draft) return;
+
+    setSelectingDraftId(review.id);
+    try {
+      const { error } = await supabase
+        .from('tabelog_reviews')
+        .update({
+          review_title: draft.title,
+          review_comment: draft.comment,
+          generated_review: `タイトル：${draft.title}\nコメント：${draft.comment}`,
+        })
+        .eq('id', review.id);
+
+      if (error) throw error;
+
+      setReviews(prev =>
+        prev.map(r =>
+          r.id === review.id
+            ? {
+                ...r,
+                review_title: draft.title,
+                review_comment: draft.comment,
+                generated_review: `タイトル：${draft.title}\nコメント：${draft.comment}`,
+              }
+            : r
+        )
+      );
+    } catch (err: unknown) {
+      console.error('Failed to select draft:', err);
+      alert(err instanceof Error ? err.message : '案の切り替えに失敗しました');
+    } finally {
+      setSelectingDraftId(null);
     }
   };
 
@@ -1101,6 +1315,21 @@ export default function DashboardPage() {
                     ))}
                   </div>
                 )}
+                {revisitInfo && (
+                  <div className={styles.revisitNote}>
+                    <History size={12} />
+                    <span>
+                      この店は{revisitInfo.visitCount}回目の訪問です
+                      {revisitInfo.lastRating != null && (
+                        <>（前回: ★{revisitInfo.lastRating.toFixed(1)}
+                        {revisitInfo.lastVisitDate && `・${new Date(revisitInfo.lastVisitDate).toLocaleDateString('ja-JP')}`}）</>
+                      )}
+                    </span>
+                  </div>
+                )}
+                {revisitInfo?.lastPrivateMemo && (
+                  <div className={styles.revisitMemo}>前回の自分用メモ: {revisitInfo.lastPrivateMemo}</div>
+                )}
               </div>
 
               <div className="form-group">
@@ -1229,7 +1458,21 @@ export default function DashboardPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">体験メモ（任意・事実ベース）</label>
+                <div className={styles.memoLabelRow}>
+                  <label className="form-label">体験メモ（任意・事実ベース）</label>
+                  {speechSupported && (
+                    <button
+                      type="button"
+                      onClick={toggleVoiceInput}
+                      disabled={generating}
+                      className={`${styles.voiceBtn} ${isListening ? styles.voiceBtnActive : ''}`}
+                      title={isListening ? '音声入力を停止' : '音声でメモを入力'}
+                    >
+                      <Mic size={13} />
+                      <span>{isListening ? '聞き取り中… タップで停止' : '音声入力'}</span>
+                    </button>
+                  )}
+                </div>
                 <textarea
                   placeholder="例：
 ・ローストビーフが美味しかった
@@ -1562,6 +1805,27 @@ export default function DashboardPage() {
                     const editingComment = editingReviewKey === commentKey;
                     return (
                       <div className={styles.cardReviewText}>
+                        {review.review_drafts && review.review_drafts.length > 1 && review.status !== 'posted' && (
+                          <div className={styles.draftChips}>
+                            <span className={styles.draftChipsLabel}>下書き案:</span>
+                            {review.review_drafts.map((d, i) => {
+                              const active = d.title === title && d.comment === comment;
+                              return (
+                                <button
+                                  type="button"
+                                  key={i}
+                                  onClick={() => handleSelectDraft(review, i)}
+                                  className={`${styles.draftChip} ${active ? styles.draftChipActive : ''}`}
+                                  disabled={selectingDraftId !== null || active}
+                                  title={d.title}
+                                >
+                                  案{i + 1}
+                                </button>
+                              );
+                            })}
+                            {selectingDraftId === review.id && <Loader2 className={styles.spinner} size={13} />}
+                          </div>
+                        )}
                         {title && (
                           <div className={styles.reviewSection}>
                             <div className={styles.reviewSectionHeader}>
@@ -1730,6 +1994,74 @@ export default function DashboardPage() {
                   ) : (
                     <div className={styles.generatingPlaceholder} style={{ color: 'var(--danger)' }}>
                       生成に失敗しました。このカードを削除してやり直してください。
+                    </div>
+                  )}
+
+                  {/* Private memo（非公開の自分用メモ） */}
+                  {review.status !== 'processing' && (
+                    <div className={styles.privateMemoSection}>
+                      {editingPrivateMemoId === review.id ? (
+                        <div className={styles.reviewEditForm}>
+                          <textarea
+                            value={editPrivateMemoValue}
+                            onChange={(e) => setEditPrivateMemoValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') handleCancelEditPrivateMemo();
+                            }}
+                            rows={3}
+                            placeholder="例：次は塩ラーメンを頼む / 連れが海老アレルギー（この内容は投稿にもAIにも使われません）"
+                            className={styles.reviewEditTextarea}
+                            autoFocus
+                            disabled={savingPrivateMemoId === review.id}
+                          />
+                          <div className={styles.reviewEditActions}>
+                            <button
+                              onClick={() => handleSavePrivateMemo(review.id)}
+                              className="btn btn-primary btn-sm"
+                              disabled={savingPrivateMemoId === review.id}
+                            >
+                              {savingPrivateMemoId === review.id ? <Loader2 className={styles.spinner} size={12} /> : <Check size={12} />}
+                              <span>保存</span>
+                            </button>
+                            <button
+                              onClick={handleCancelEditPrivateMemo}
+                              className="btn btn-secondary btn-sm"
+                              disabled={savingPrivateMemoId === review.id}
+                            >
+                              <X size={12} />
+                              <span>キャンセル</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : review.private_memo ? (
+                        <div className={styles.privateMemoBox}>
+                          <div className={styles.privateMemoHeader}>
+                            <span className={styles.privateMemoLabel}>
+                              <Lock size={11} />
+                              自分用メモ（非公開）
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditPrivateMemo(review)}
+                              className={styles.miniCopyBtn}
+                              title="自分用メモを編集"
+                            >
+                              <Edit2 size={11} />
+                              <span>編集</span>
+                            </button>
+                          </div>
+                          <p className={styles.privateMemoText}>{review.private_memo}</p>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditPrivateMemo(review)}
+                          className={styles.addPrivateMemoBtn}
+                        >
+                          <Lock size={12} />
+                          <span>自分用メモを追加（非公開）</span>
+                        </button>
+                      )}
                     </div>
                   )}
 

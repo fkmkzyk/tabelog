@@ -104,6 +104,74 @@ export interface GeneratedReview {
   comment: string;
 }
 
+// Structured output schema for multi-draft generation: three variants with
+// different writing styles, each holding {title, comment}.
+const multiDraftResponseSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    drafts: {
+      type: SchemaType.ARRAY,
+      description: '文体の異なるレビュー3案',
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          title: { type: SchemaType.STRING, description: 'レビューのタイトル' },
+          comment: { type: SchemaType.STRING, description: 'レビューの本文（コメント）' },
+        },
+        required: ['title', 'comment'],
+      },
+    },
+  },
+  required: ['drafts'],
+};
+
+/**
+ * Get a Gemini model configured to return three review drafts
+ * ({drafts: [{title, comment} x3]}) for multi-draft generation.
+ */
+export function getGeminiMultiDraftModel() {
+  if (!genAI) {
+    throw { message: 'Gemini API is not configured on the server.', status: 500 };
+  }
+  return genAI.getGenerativeModel({
+    model: geminiModelName,
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: multiDraftResponseSchema,
+    },
+  });
+}
+
+/**
+ * Parse a structured-output response into an array of {title, comment} drafts.
+ * Throws a structured error if the response is not the expected JSON or empty.
+ * At most 3 drafts are returned.
+ */
+export function parseGeneratedDrafts(raw: string): GeneratedReview[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw { message: 'AIの応答（JSON）の解析に失敗しました', status: 502 };
+  }
+  const obj = parsed as { drafts?: unknown };
+  if (!Array.isArray(obj.drafts)) {
+    throw { message: 'AIの応答に必要なフィールド（drafts）がありません', status: 502 };
+  }
+  const drafts = obj.drafts
+    .filter((d): d is { title: string; comment: string } =>
+      typeof (d as { title?: unknown }).title === 'string' &&
+      typeof (d as { comment?: unknown }).comment === 'string'
+    )
+    .map(d => ({ title: d.title.trim(), comment: d.comment.trim() }))
+    .filter(d => d.title.length > 0 || d.comment.length > 0)
+    .slice(0, 3);
+  if (drafts.length === 0) {
+    throw { message: 'AIの応答に有効なレビュー案がありません', status: 502 };
+  }
+  return drafts;
+}
+
 /**
  * Parse a structured-output response into {title, comment}.
  * Throws a structured error if the response is not the expected JSON.
