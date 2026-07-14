@@ -71,6 +71,13 @@
   align-items: start;
 }
 
+/* Grid items default to min-width:auto, which lets their min-content
+   (form controls' intrinsic widths on iOS Safari) expand the track wider
+   than the viewport and overflow to the right. Allow them to shrink. */
+.mainGrid > * {
+  min-width: 0;
+}
+
 @media (max-width: 900px) {
   .mainGrid {
     grid-template-columns: 1fr;
@@ -474,6 +481,8 @@
   outline: none;
   transition: var(--transition-smooth);
   width: 220px;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .editShopNameInput:focus {
