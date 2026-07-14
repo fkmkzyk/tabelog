@@ -427,6 +427,13 @@
   gap: 1rem;
 }
 
+/* Let the shop-name/meta column shrink so the status badge keeps its
+   width instead of being squeezed and wrapping vertically off-screen. */
+.cardHeader > div {
+  min-width: 0;
+  flex: 1;
+}
+
 .cardShopName {
   font-size: 1.2rem;
   font-weight: 700;
@@ -565,6 +572,8 @@
   font-size: 0.75rem;
   font-weight: 600;
   border: 1px solid transparent;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .processing {
