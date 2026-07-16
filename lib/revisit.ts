@@ -1,9 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { describeVisitDateTime } from './gemini';
 
 /**
  * 同じ店舗（place_id）への過去の訪問を検索し、AIプロンプト用の再訪情報を
  * 日本語で組み立てるヘルパー。過去の訪問がない・place_id不明ならnull。
- * 例: 「この店への2回目の訪問（前回の評価: 3.6、前回の訪問日: 2026-06-13）」
+ * 例: 「この店への2回目の訪問（前回の評価: 3.6、前回の訪問時期: 6月中旬）」
+ * 具体的な日付はレビュー本文にコピーされやすいため、あえて渡さない。
  */
 export async function describeRevisit(
   client: SupabaseClient,
@@ -29,7 +31,8 @@ export async function describeRevisit(
     const prev = (data?.[0] ?? null) as unknown as { rating: number; visit_date: string | null } | null;
     if (prev) {
       desc += `（前回の評価: ${Number(prev.rating).toFixed(1)}`;
-      if (prev.visit_date) desc += `、前回の訪問日: ${prev.visit_date}`;
+      const prevPeriod = describeVisitDateTime(prev.visit_date, null);
+      if (prevPeriod) desc += `、前回の訪問時期: ${prevPeriod}`;
       desc += '）';
     }
     return desc;

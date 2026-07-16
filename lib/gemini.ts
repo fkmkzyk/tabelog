@@ -192,18 +192,32 @@ export function parseGeneratedReview(raw: string): GeneratedReview {
 
 /**
  * Format visit date/time stored in the DB ('YYYY-MM-DD', 'HH:MM[:SS]') into a
- * Japanese description for prompts, e.g. "2026年6月13日 19時ごろ".
+ * fuzzy Japanese description for prompts, e.g. "6月中旬の夜（ディナー）".
  * Returns null when no valid visit date is available.
+ *
+ * Deliberately omits the literal date (and year): exact dates handed to the
+ * model tend to be copied verbatim into the generated review text, while the
+ * prompts only need season/time-of-day context.
  */
 export function describeVisitDateTime(visitDate: string | null, visitTime: string | null): string | null {
   if (!visitDate) return null;
   const dateMatch = visitDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!dateMatch) return null;
 
-  let desc = `${Number(dateMatch[1])}年${Number(dateMatch[2])}月${Number(dateMatch[3])}日`;
+  const day = Number(dateMatch[3]);
+  const period = day <= 10 ? '上旬' : day <= 20 ? '中旬' : '下旬';
+  let desc = `${Number(dateMatch[2])}月${period}`;
+
   const timeMatch = visitTime ? visitTime.match(/^(\d{1,2}):/) : null;
   if (timeMatch) {
-    desc += ` ${Number(timeMatch[1])}時ごろ`;
+    const hour = Number(timeMatch[1]);
+    const slot =
+      hour >= 5 && hour < 11 ? '朝' :
+      hour >= 11 && hour < 15 ? '昼（ランチ）' :
+      hour >= 15 && hour < 18 ? '夕方' :
+      hour >= 18 && hour < 23 ? '夜（ディナー）' :
+      '深夜';
+    desc += `の${slot}`;
   }
   return desc;
 }
