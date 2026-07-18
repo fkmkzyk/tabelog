@@ -91,6 +91,13 @@ body::after {
   padding: 2rem 1rem;
 }
 
+/* モバイル: 下部タブバーとホームバー（セーフエリア）のぶん余白を確保 */
+@media (max-width: 900px) {
+  .container {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+}
+
 /* Typography & Titles */
 h1, h2, h3, h4, h5, h6 {
   font-weight: 700;
