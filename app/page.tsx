@@ -30,7 +30,9 @@ import {
   History,
   Lock,
   Mic,
-  Search
+  Search,
+  ChevronRight,
+  MoreHorizontal
 } from 'lucide-react';
 
 // Web Speech API の最小型定義（TypeScript標準に含まれないため）
@@ -279,6 +281,11 @@ export default function DashboardPage() {
   // List search & sort states
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<'created_desc' | 'visit_desc' | 'rating_desc' | 'rating_asc'>('created_desc');
+  // Digest card expansion (1枚だけ展開) & per-card "…" action menu
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  // Mobile two-screen switching (一覧 ⇄ 作成). Desktop shows both columns.
+  const [mobileView, setMobileView] = useState<'list' | 'create'>('list');
 
   // Rewrite states
   const [openRewriteId, setOpenRewriteId] = useState<string | null>(null);
@@ -790,6 +797,10 @@ export default function DashboardPage() {
 
       // Refresh list immediately so user sees 'processing' state
       setReviews(prev => [insertedReview, ...prev]);
+      // モバイルでは一覧に切り替え、生成中カードを展開して進行を見せる
+      setMobileView('list');
+      setExpandedId(insertedReview.id);
+      window.scrollTo({ top: 0 });
 
       // Copy local variables to send in fetch
       const payloadImages = [...photosBase64];
@@ -1256,6 +1267,15 @@ export default function DashboardPage() {
     return sorted;
   }, [reviews, filterTab, searchQuery, sortKey]);
 
+  // 一覧の月見出し（日付順ソートの時だけ）。visit順は訪問日、作成順は作成日時を基準にする
+  const getMonthLabel = useCallback((review: Review): string | null => {
+    if (sortKey !== 'created_desc' && sortKey !== 'visit_desc') return null;
+    const base = sortKey === 'visit_desc' ? (review.visit_date || review.created_at) : review.created_at;
+    const d = new Date(base);
+    if (isNaN(d.getTime())) return null;
+    return `${d.getFullYear()}年${d.getMonth() + 1}月`;
+  }, [sortKey]);
+
   if (loadingUser) {
     return (
       <div className={styles.loadingScreen}>
@@ -1290,8 +1310,8 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Main Grid */}
-      <div className={styles.mainGrid}>
+      {/* Main Grid（モバイルは下部タブで 一覧⇄作成 を切替、デスクトップは2カラム） */}
+      <div className={`${styles.mainGrid} ${mobileView === 'create' ? styles.mobileShowCreate : styles.mobileShowList}`}>
         
         {/* Left Side: Creation Form */}
         <section className={styles.formSection}>
@@ -1599,9 +1619,88 @@ export default function DashboardPage() {
                 <p>{searchQuery.trim() ? `「${searchQuery.trim()}」に一致するレビューはありません。` : '対象のレビューはありません。'}</p>
               </div>
             ) : (
-              filteredReviews.map((review) => (
-                <div key={review.id} className={`${styles.reviewCard} glass-card`}>
-                  
+              filteredReviews.map((review, reviewIdx) => {
+                const isExpanded = expandedId === review.id;
+                const monthLabel = getMonthLabel(review);
+                const prevMonthLabel = reviewIdx > 0 ? getMonthLabel(filteredReviews[reviewIdx - 1]) : null;
+                const digestThumbPath = review.photo_thumbs?.find(p => thumbUrls[p]);
+                return (
+                <React.Fragment key={review.id}>
+                {monthLabel && monthLabel !== prevMonthLabel && (
+                  <div className={styles.monthHeader}>{monthLabel}</div>
+                )}
+                <div className={`${styles.reviewCard} glass-card ${isExpanded ? styles.reviewCardOpen : ''}`}>
+
+                  {/* ダイジェスト行: タップで展開/折りたたみ */}
+                  <button
+                    type="button"
+                    className={styles.digestRow}
+                    onClick={() => {
+                      setExpandedId(isExpanded ? null : review.id);
+                      setMenuOpenId(null);
+                    }}
+                    aria-expanded={isExpanded}
+                  >
+                    {digestThumbPath ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={thumbUrls[digestThumbPath]} alt="" className={styles.digestThumb} loading="lazy" />
+                    ) : (
+                      <span className={styles.digestThumbPh}><UtensilsCrossed size={20} /></span>
+                    )}
+                    <span className={styles.digestMain}>
+                      <span className={styles.digestName}>{review.shop_name}</span>
+                      <span className={styles.digestMeta}>
+                        {renderStars(review.rating, 12)}
+                        <span className={styles.cardRatingValue}>{Number(review.rating).toFixed(1)}</span>
+                        {review.visit_date && (
+                          <span>・ {new Date(review.visit_date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })} 訪問</span>
+                        )}
+                      </span>
+                    </span>
+                    <span className={`${styles.statusBadge} ${styles[review.status]}`}>
+                      {review.status === 'processing' && (
+                        <>
+                          <Loader2 className={styles.spinner} size={12} />
+                          <span>生成中...</span>
+                        </>
+                      )}
+                      {review.status === 'draft' && (
+                        <>
+                          <Clock size={12} />
+                          <span>未投稿</span>
+                        </>
+                      )}
+                      {review.status === 'failed' && (
+                        <>
+                          <X size={12} />
+                          <span>生成失敗</span>
+                        </>
+                      )}
+                      {review.status === 'posted_tabelog' && (
+                        <>
+                          <CheckCircle2 size={12} color="var(--primary)" />
+                          <span>食べログ済</span>
+                        </>
+                      )}
+                      {review.status === 'posted_google' && (
+                        <>
+                          <CheckCircle2 size={12} color="var(--secondary)" />
+                          <span>Googleマップ済</span>
+                        </>
+                      )}
+                      {review.status === 'posted' && (
+                        <>
+                          <CheckCircle2 size={12} color="var(--success)" />
+                          <span>すべて投稿済</span>
+                        </>
+                      )}
+                    </span>
+                    <ChevronRight size={16} className={styles.digestChev} />
+                  </button>
+
+                  {isExpanded && (
+                  <div className={styles.cardBody}>
+
                   <div className={styles.cardHeader}>
                     <div>
                       {editingShopNameId === review.id ? (
@@ -1784,45 +1883,6 @@ export default function DashboardPage() {
                         </a>
                       </div>
                     </div>
-
-                    <span className={`${styles.statusBadge} ${styles[review.status]}`}>
-                      {review.status === 'processing' && (
-                        <>
-                          <Loader2 className={styles.spinner} size={12} />
-                          <span>生成中...</span>
-                        </>
-                      )}
-                      {review.status === 'draft' && (
-                        <>
-                          <Clock size={12} />
-                          <span>未投稿</span>
-                        </>
-                      )}
-                      {review.status === 'failed' && (
-                        <>
-                          <X size={12} />
-                          <span>生成失敗</span>
-                        </>
-                      )}
-                      {review.status === 'posted_tabelog' && (
-                        <>
-                          <CheckCircle2 size={12} color="var(--primary)" />
-                          <span>食べログ済</span>
-                        </>
-                      )}
-                      {review.status === 'posted_google' && (
-                        <>
-                          <CheckCircle2 size={12} color="var(--secondary)" />
-                          <span>Googleマップ済</span>
-                        </>
-                      )}
-                      {review.status === 'posted' && (
-                        <>
-                          <CheckCircle2 size={12} color="var(--success)" />
-                          <span>すべて投稿済</span>
-                        </>
-                      )}
-                    </span>
                   </div>
 
                   {review.photo_thumbs && review.photo_thumbs.some(path => thumbUrls[path]) && (
@@ -2172,15 +2232,20 @@ export default function DashboardPage() {
                   )}
 
                   <div className={styles.cardActions}>
-                    {review.generated_review && (
-                      <div className={styles.postedButtonsGroup}>
-                        {(() => {
-                          const tabelogDone = review.status === 'posted_tabelog' || review.status === 'posted';
-                          const googleDone = review.status === 'posted_google' || review.status === 'posted';
-                          const postComment = getReviewParts(review).comment;
-                          return (
-                            <>
-                              {review.place_id && postComment && (
+                    {review.generated_review ? (() => {
+                      const tabelogDone = review.status === 'posted_tabelog' || review.status === 'posted';
+                      const googleDone = review.status === 'posted_google' || review.status === 'posted';
+                      const postComment = getReviewParts(review).comment;
+                      const canGPost = !!review.place_id && !!postComment;
+                      return (
+                        <div className={styles.actionRow}>
+                          {/* 状態に応じて「次にやること」を主ボタン1つで示す */}
+                          {tabelogDone && googleDone ? (
+                            <div className={styles.primaryDone}>
+                              <CheckCircle2 size={15} color="var(--success)" />
+                              <span>すべて投稿済</span>
+                            </div>
+                          ) : !googleDone && canGPost ? (
                                 // ワンタップ投稿: コメントをコピーしつつ、Googleマップの
                                 // この店舗のクチコミ投稿画面を開く（place_id利用）。
                                 // iOSではまず comgooglemaps:// スキームでGoogleマップ
@@ -2192,7 +2257,7 @@ export default function DashboardPage() {
                                 // ネイティブ遷移に任せ、失敗時は非同期APIで再試行して
                                 // コピーできてから開く（未コピーのまま開く事故を防ぐ）
                                 <a
-                                  href={`https://search.google.com/local/writereview?placeid=${encodeURIComponent(review.place_id)}`}
+                                  href={`https://search.google.com/local/writereview?placeid=${encodeURIComponent(review.place_id ?? '')}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={async (e) => {
@@ -2251,71 +2316,132 @@ export default function DashboardPage() {
                                       }
                                     }, 1200);
                                   }}
-                                  className={`${styles.platformPostBtn} ${styles.gPostBtn} btn btn-secondary`}
+                                  className={`${styles.primaryAction} btn btn-primary`}
                                   title="コメントをコピーして、Googleマップのこの店のクチコミ投稿画面を開く"
                                 >
                                   <ExternalLink size={14} />
                                   <span>{copiedId === `${review.id}-gpost` ? 'コメントをコピーして開きました' : 'Googleマップに投稿'}</span>
                                 </a>
-                              )}
-                              <button
-                                onClick={() => handleTogglePlatformPosted(review.id, 'tabelog')}
-                                className={`${styles.platformPostBtn} btn btn-secondary ${tabelogDone ? styles.platformPostBtnDone : ''}`}
-                                title={tabelogDone ? '食べログへの投稿完了を取り消す' : '食べログへの投稿を完了にする'}
-                              >
-                                <CheckCircle2 size={14} color={tabelogDone ? 'var(--success)' : 'var(--primary)'} />
-                                <span>{tabelogDone ? '食べログ済' : '食べログ完了'}</span>
-                              </button>
-                              <button
-                                onClick={() => handleTogglePlatformPosted(review.id, 'google')}
-                                className={`${styles.platformPostBtn} btn btn-secondary ${googleDone ? styles.platformPostBtnDone : ''}`}
-                                title={googleDone ? 'Googleマップへの投稿完了を取り消す' : 'Googleマップへの投稿を完了にする'}
-                              >
-                                <CheckCircle2 size={14} color={googleDone ? 'var(--success)' : 'var(--secondary)'} />
-                                <span>{googleDone ? 'Googleマップ済' : 'Googleマップ完了'}</span>
-                              </button>
-                            </>
-                          );
-                        })()}
-                        {review.status !== 'processing' && (
-                          <button
-                            onClick={() => {
-                              if (openRewriteId === review.id) {
-                                setOpenRewriteId(null);
-                                setRewriteInstruction('');
-                                setRewriteError(null);
-                              } else {
-                                setOpenRewriteId(review.id);
-                                setRewriteInstruction('');
-                                setRewriteError(null);
-                              }
-                            }}
-                            className={`${styles.platformPostBtn} ${styles.rewriteBtn} btn btn-secondary ${openRewriteId === review.id ? styles.activeRewriteToggle : ''}`}
-                            title="AIでレビューを修正・再生成"
-                          >
-                            <RefreshCw size={14} className={rewritingId === review.id ? styles.spinIcon : ''} color="var(--primary)" />
-                            <span>リライト</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
+                          ) : !tabelogDone ? (
+                            <button
+                              onClick={() => handleTogglePlatformPosted(review.id, 'tabelog')}
+                              className={`${styles.primaryAction} btn btn-primary`}
+                              title="食べログへの投稿を完了にする"
+                            >
+                              <CheckCircle2 size={15} />
+                              <span>食べログ済にする</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleTogglePlatformPosted(review.id, 'google')}
+                              className={`${styles.primaryAction} btn btn-primary`}
+                              title="Googleマップへの投稿を完了にする"
+                            >
+                              <CheckCircle2 size={15} />
+                              <span>Googleマップ済にする</span>
+                            </button>
+                          )}
 
-                    <button
-                      onClick={() => handleDeleteReview(review.id)}
-                      className={`${styles.deleteBtn}`}
-                      title="削除する"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                          {/* その他の操作（完了トグル・リライト・削除）は ⋯ に収納 */}
+                          <div className={styles.moreWrap}>
+                            <button
+                              type="button"
+                              className={styles.moreBtn}
+                              onClick={() => setMenuOpenId(menuOpenId === review.id ? null : review.id)}
+                              aria-label="その他の操作"
+                              aria-expanded={menuOpenId === review.id}
+                            >
+                              <MoreHorizontal size={18} />
+                            </button>
+                            {menuOpenId === review.id && (
+                              <div className={styles.moreMenu}>
+                                <button
+                                  type="button"
+                                  className={styles.moreMenuItem}
+                                  onClick={() => { setMenuOpenId(null); handleTogglePlatformPosted(review.id, 'tabelog'); }}
+                                >
+                                  <CheckCircle2 size={14} color={tabelogDone ? 'var(--success)' : 'var(--primary)'} />
+                                  <span>{tabelogDone ? '食べログ済を取り消す' : '食べログ済にする'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className={styles.moreMenuItem}
+                                  onClick={() => { setMenuOpenId(null); handleTogglePlatformPosted(review.id, 'google'); }}
+                                >
+                                  <CheckCircle2 size={14} color={googleDone ? 'var(--success)' : 'var(--secondary)'} />
+                                  <span>{googleDone ? 'Googleマップ済を取り消す' : 'Googleマップ済にする'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className={styles.moreMenuItem}
+                                  onClick={() => {
+                                    setMenuOpenId(null);
+                                    setOpenRewriteId(openRewriteId === review.id ? null : review.id);
+                                    setRewriteInstruction('');
+                                    setRewriteError(null);
+                                  }}
+                                >
+                                  <RefreshCw size={14} className={rewritingId === review.id ? styles.spinIcon : ''} color="var(--primary)" />
+                                  <span>リライト</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`${styles.moreMenuItem} ${styles.moreMenuDanger}`}
+                                  onClick={() => { setMenuOpenId(null); handleDeleteReview(review.id); }}
+                                >
+                                  <Trash2 size={14} />
+                                  <span>削除</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })() : (
+                      // 生成前（生成中・失敗）のカードは削除のみ。
+                      // 固まったprocessingレコードも消せるよう常に表示する
+                      <button
+                        onClick={() => handleDeleteReview(review.id)}
+                        className={`${styles.deleteBtn}`}
+                        title="削除する"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
 
+                  </div>
+                  )}
+
                 </div>
-              ))
+                </React.Fragment>
+                );
+              })
             )}
           </div>
         </section>
 
       </div>
+
+      {/* モバイル専用の下部タブバー（一覧⇄作成） */}
+      <nav className={styles.bottomNav}>
+        <button
+          type="button"
+          className={`${styles.bottomNavBtn} ${mobileView === 'list' ? styles.bottomNavActive : ''}`}
+          onClick={() => { setMobileView('list'); window.scrollTo({ top: 0 }); }}
+        >
+          <FileText size={20} />
+          <span>一覧</span>
+        </button>
+        <button
+          type="button"
+          className={`${styles.bottomNavBtn} ${mobileView === 'create' ? styles.bottomNavActive : ''}`}
+          onClick={() => { setMobileView('create'); window.scrollTo({ top: 0 }); }}
+        >
+          <PlusCircle size={20} />
+          <span>作成</span>
+        </button>
+      </nav>
     </div>
   );
 }
