@@ -2182,32 +2182,74 @@ export default function DashboardPage() {
                             <>
                               {review.place_id && postComment && (
                                 // ワンタップ投稿: コメントをコピーしつつ、Googleマップの
-                                // この店舗のクチコミ投稿画面を直接開く（place_id利用）。
-                                // コピーは同期APIを優先し、成功した場合のみアンカーの
-                                // ネイティブ遷移に任せる。同期コピーが失敗した場合は
-                                // 遷移を止めて非同期APIで再試行し、コピーできてから開く
-                                // （未コピーのまま投稿画面だけが開く事故を防ぐ）
+                                // この店舗のクチコミ投稿画面を開く（place_id利用）。
+                                // iOSではまず comgooglemaps:// スキームでGoogleマップ
+                                // アプリを起動する（PWAだと外部リンクがブラウザシートで
+                                // 開き、閉じる手間があるため。アプリなら「◀」で即戻れる）。
+                                // アプリ未インストール等で画面が切り替わらなかった場合は
+                                // 従来のWeb投稿フォームへ自動フォールバック。
+                                // iOS以外は従来通り: 同期コピー成功時のみアンカーの
+                                // ネイティブ遷移に任せ、失敗時は非同期APIで再試行して
+                                // コピーできてから開く（未コピーのまま開く事故を防ぐ）
                                 <a
                                   href={`https://search.google.com/local/writereview?placeid=${encodeURIComponent(review.place_id)}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={async (e) => {
                                     const url = e.currentTarget.href;
-                                    if (copyTextSync(postComment)) {
-                                      setCopiedId(`${review.id}-gpost`);
-                                      setTimeout(() => setCopiedId(null), 2000);
-                                      return; // ネイティブ遷移に任せる
+                                    const ua = navigator.userAgent;
+                                    const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+                                      (/Macintosh/.test(ua) && 'ontouchend' in document);
+                                    if (!isIOS) {
+                                      if (copyTextSync(postComment)) {
+                                        setCopiedId(`${review.id}-gpost`);
+                                        setTimeout(() => setCopiedId(null), 2000);
+                                        return; // ネイティブ遷移に任せる
+                                      }
+                                      e.preventDefault();
+                                      try {
+                                        await navigator.clipboard.writeText(postComment);
+                                        setCopiedId(`${review.id}-gpost`);
+                                        setTimeout(() => setCopiedId(null), 2000);
+                                        const opened = window.open(url, '_blank', 'noopener,noreferrer');
+                                        if (!opened) window.location.assign(url); // ポップアップブロック時は同タブで開く
+                                      } catch {
+                                        alert('コメントのコピーに失敗しました。コメント欄の「コピー」ボタンでコピーしてから、もう一度お試しください。');
+                                      }
+                                      return;
                                     }
+                                    // iOS: コピー完了を確実にしてからアプリを起動
                                     e.preventDefault();
-                                    try {
-                                      await navigator.clipboard.writeText(postComment);
-                                      setCopiedId(`${review.id}-gpost`);
-                                      setTimeout(() => setCopiedId(null), 2000);
-                                      const opened = window.open(url, '_blank', 'noopener,noreferrer');
-                                      if (!opened) window.location.assign(url); // ポップアップブロック時は同タブで開く
-                                    } catch {
-                                      alert('コメントのコピーに失敗しました。コメント欄の「コピー」ボタンでコピーしてから、もう一度お試しください。');
+                                    let copied = copyTextSync(postComment);
+                                    if (!copied) {
+                                      try {
+                                        await navigator.clipboard.writeText(postComment);
+                                        copied = true;
+                                      } catch { /* 下のガードで通知 */ }
                                     }
+                                    if (!copied) {
+                                      alert('コメントのコピーに失敗しました。コメント欄の「コピー」ボタンでコピーしてから、もう一度お試しください。');
+                                      return;
+                                    }
+                                    setCopiedId(`${review.id}-gpost`);
+                                    setTimeout(() => setCopiedId(null), 2000);
+                                    // 店名（＋保存済み座標）でGoogleマップアプリの該当店舗を開く。
+                                    // スキームには投稿フォーム直行のパラメータが無いため、
+                                    // 店舗画面から「クチコミ」をタップしてもらう
+                                    const query = encodeURIComponent(review.shop_name);
+                                    const center = review.place_lat != null && review.place_lng != null
+                                      ? `&center=${review.place_lat},${review.place_lng}`
+                                      : '';
+                                    window.location.href = `comgooglemaps://?q=${query}${center}`;
+                                    // アプリが起動すればこのページは非表示になる。
+                                    // 一定時間たっても表示されたまま＝アプリ未インストールと
+                                    // みなし、Webの投稿フォームを開く
+                                    window.setTimeout(() => {
+                                      if (!document.hidden) {
+                                        const opened = window.open(url, '_blank', 'noopener,noreferrer');
+                                        if (!opened) window.location.assign(url);
+                                      }
+                                    }, 1200);
                                   }}
                                   className={`${styles.platformPostBtn} ${styles.gPostBtn} btn btn-secondary`}
                                   title="コメントをコピーして、Googleマップのこの店のクチコミ投稿画面を開く"
