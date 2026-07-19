@@ -210,6 +210,44 @@
   text-align: right;
 }
 
+/* 評価スライダーの −/＋ ステッパー（0.2刻みの微調整用） */
+.ratingStepBtn {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(250, 250, 249, 0.06);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.ratingStepBtn:hover:not(:disabled) {
+  color: var(--primary);
+  border-color: rgba(249, 115, 22, 0.4);
+}
+
+.ratingStepBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* 狭い画面では星を1行目に独立させ、−/スライダー/＋/数値を2行目に揃える */
+@media (max-width: 600px) {
+  .starRatingContainer .starsWrapper {
+    flex-basis: 100%;
+    justify-content: center;
+  }
+}
+
 /* Photo Upload Group */
 .photoUploadGroup {
   display: grid;
@@ -657,6 +695,46 @@
 .moreMenuDanger:hover {
   background: rgba(239, 68, 68, 0.08);
   color: var(--danger);
+}
+
+/* スケルトンローディング（一覧取得中のプレースホルダー） */
+.skeletonCard {
+  pointer-events: none;
+}
+
+.skeletonCard .digestMain {
+  gap: 0.45rem;
+}
+
+.skeletonLine {
+  display: block;
+  height: 0.8rem;
+  border-radius: 6px;
+  background: rgba(250, 250, 249, 0.07);
+}
+
+.skeletonShimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeletonShimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(250, 250, 249, 0.07), transparent);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonShimmer::after {
+    animation: none;
+  }
 }
 
 /* トースト通知（alert の置き換え） */

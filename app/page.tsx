@@ -1514,6 +1514,15 @@ export default function DashboardPage() {
                   <div className={styles.starsWrapper}>
                     {renderStars(rating)}
                   </div>
+                  <button
+                    type="button"
+                    className={styles.ratingStepBtn}
+                    onClick={() => setRating(r => Math.max(1.0, Math.round((r - 0.2) * 10) / 10))}
+                    disabled={generating || rating <= 1.0}
+                    aria-label="評価を0.2下げる"
+                  >
+                    −
+                  </button>
                   <input
                     type="range"
                     min="1.0"
@@ -1524,6 +1533,15 @@ export default function DashboardPage() {
                     onChange={(e) => setRating(parseFloat(e.target.value))}
                     disabled={generating}
                   />
+                  <button
+                    type="button"
+                    className={styles.ratingStepBtn}
+                    onClick={() => setRating(r => Math.min(5.0, Math.round((r + 0.2) * 10) / 10))}
+                    disabled={generating || rating >= 5.0}
+                    aria-label="評価を0.2上げる"
+                  >
+                    ＋
+                  </button>
                   <span className={styles.ratingValue}>{rating.toFixed(1)}</span>
                 </div>
               </div>
@@ -1639,10 +1657,20 @@ export default function DashboardPage() {
 
           <div className={styles.reviewList}>
             {loadingReviews && reviews.length === 0 ? (
-              <div className={styles.listEmptyState}>
-                <Loader2 className={styles.spinner} size={28} />
-                <p>レビューを取得中...</p>
-              </div>
+              // 取得中はカード形のスケルトンを表示（レイアウトのガタつき防止）
+              <>
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className={`${styles.reviewCard} glass-card ${styles.skeletonCard}`} aria-hidden="true">
+                    <div className={styles.digestRow}>
+                      <span className={`${styles.digestThumbPh} ${styles.skeletonShimmer}`} />
+                      <span className={styles.digestMain}>
+                        <span className={`${styles.skeletonLine} ${styles.skeletonShimmer}`} style={{ width: '62%' }} />
+                        <span className={`${styles.skeletonLine} ${styles.skeletonShimmer}`} style={{ width: '38%' }} />
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </>
             ) : filteredReviews.length === 0 ? (
               <div className={`${styles.listEmptyState} glass-card`}>
                 <FileText size={40} className={styles.emptyIcon} />
