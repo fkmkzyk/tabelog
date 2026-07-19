@@ -35,6 +35,9 @@ import {
   MoreHorizontal
 } from 'lucide-react';
 
+// トースト自動消去タイマー（ページ単位で1つなのでモジュールスコープで管理）
+let toastTimer: number | null = null;
+
 // Web Speech API の最小型定義（TypeScript標準に含まれないため）
 interface SpeechRecognitionEventLike {
   resultIndex: number;
@@ -286,6 +289,13 @@ export default function DashboardPage() {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   // Mobile two-screen switching (一覧 ⇄ 作成). Desktop shows both columns.
   const [mobileView, setMobileView] = useState<'list' | 'create'>('list');
+  // 画面内トースト通知（alert() の置き換え）
+  const [toastMsg, setToastMsg] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
+  const showToast = useCallback((text: string, kind: 'success' | 'error' = 'error') => {
+    setToastMsg({ text, kind });
+    if (toastTimer !== null) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => setToastMsg(null), 3500);
+  }, []);
 
   // Rewrite states
   const [openRewriteId, setOpenRewriteId] = useState<string | null>(null);
@@ -899,7 +909,7 @@ export default function DashboardPage() {
       );
     } catch (err: unknown) {
       console.error('Failed to update status:', err);
-      alert(err instanceof Error ? err.message : 'ステータスの更新に失敗しました');
+      showToast(err instanceof Error ? err.message : 'ステータスの更新に失敗しました');
     }
   };
 
@@ -930,7 +940,7 @@ export default function DashboardPage() {
       }
     } catch (err: unknown) {
       console.error('Failed to delete review:', err);
-      alert(err instanceof Error ? err.message : '下書きの削除に失敗しました');
+      showToast(err instanceof Error ? err.message : '下書きの削除に失敗しました');
     }
   };
 
@@ -1011,7 +1021,7 @@ export default function DashboardPage() {
       setEditShopNameValue('');
     } catch (err: unknown) {
       console.error('Failed to update shop name:', err);
-      alert(err instanceof Error ? err.message : '店舗名の更新に失敗しました');
+      showToast(err instanceof Error ? err.message : '店舗名の更新に失敗しました');
     } finally {
       setSavingShopNameId(null);
     }
@@ -1045,7 +1055,7 @@ export default function DashboardPage() {
       setEditingRatingId(null);
     } catch (err: unknown) {
       console.error('Failed to update rating:', err);
-      alert(err instanceof Error ? err.message : '評価の更新に失敗しました');
+      showToast(err instanceof Error ? err.message : '評価の更新に失敗しました');
     } finally {
       setSavingRatingId(null);
     }
@@ -1082,7 +1092,7 @@ export default function DashboardPage() {
       setEditPrivateMemoValue('');
     } catch (err: unknown) {
       console.error('Failed to update private memo:', err);
-      alert(err instanceof Error ? err.message : 'メモの更新に失敗しました');
+      showToast(err instanceof Error ? err.message : 'メモの更新に失敗しました');
     } finally {
       setSavingPrivateMemoId(null);
     }
@@ -1151,7 +1161,7 @@ export default function DashboardPage() {
       setEditReviewValue('');
     } catch (err: unknown) {
       console.error('Failed to update review:', err);
-      alert(err instanceof Error ? err.message : 'レビューの更新に失敗しました');
+      showToast(err instanceof Error ? err.message : 'レビューの更新に失敗しました');
     } finally {
       setSavingReviewKey(null);
     }
@@ -1189,7 +1199,7 @@ export default function DashboardPage() {
       );
     } catch (err: unknown) {
       console.error('Failed to select draft:', err);
-      alert(err instanceof Error ? err.message : '案の切り替えに失敗しました');
+      showToast(err instanceof Error ? err.message : '案の切り替えに失敗しました');
     } finally {
       setSelectingDraftId(null);
     }
@@ -1324,9 +1334,86 @@ export default function DashboardPage() {
             {formError && <div className={styles.formError}>{formError}</div>}
 
             <form onSubmit={handleSubmit} className={styles.reviewForm}>
-              
+
+              {/* ステップ1: 写真（店名・日付・場所の自動入力の起点なので最上部） */}
               <div className="form-group">
-                <label className="form-label">店舗名 <span className={styles.required}>*</span></label>
+                <div className={styles.stepTitle}>
+                  <span className={styles.stepNum}>1</span>
+                  <span>写真を選ぶ（最大3枚）<span className={styles.required}>*</span></span>
+                </div>
+                <div className={styles.photoUploadGroup}>
+                  {photosBase64.map((base64, index) => (
+                    <div key={index} className={styles.photoPreviewCard}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={base64} alt={`Upload preview ${index + 1}`} className={styles.photoPreviewMini} />
+                      <button
+                        type="button"
+                        className={styles.removePhotoBtn}
+                        onClick={() => handleRemovePhoto(index)}
+                        disabled={generating}
+                        title="画像を削除"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+
+                  {photosBase64.length < 3 && (
+                    <div className={styles.photoUploadArea}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        ref={fileInputRef}
+                        className={styles.fileInput}
+                        onChange={handlePhotoChange}
+                        id="photo-upload-input"
+                        disabled={generating}
+                      />
+                      <label htmlFor="photo-upload-input" className={styles.photoUploadLabel}>
+                        <div className={styles.photoUploadPlaceholder}>
+                          <Camera size={26} className={styles.uploadIcon} />
+                          <span className={styles.uploadText}>写真を追加 ({photosBase64.length}/3)</span>
+                        </div>
+                      </label>
+                    </div>
+                  )}
+                </div>
+
+                {photosBase64.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className={`btn btn-secondary ${styles.identifyBtn}`}
+                      onClick={handleIdentifyShop}
+                      disabled={generating || identifying}
+                    >
+                      {identifying ? (
+                        <>
+                          <Loader2 className={styles.spinner} size={16} />
+                          <span>写真を解析中...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Wand2 size={16} />
+                          <span>写真からお店の名前・場所を推定</span>
+                        </>
+                      )}
+                    </button>
+                    {identifyNote && (
+                      <p className={styles.identifyNote}>{identifyNote}</p>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  店舗名 <span className={styles.required}>*</span>
+                  {shopNameAutoFilled && (
+                    <span className={styles.autoChip}><Check size={10} /> 写真から自動入力</span>
+                  )}
+                </label>
                 <input
                   type="text"
                   required
@@ -1381,94 +1468,6 @@ export default function DashboardPage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">評価（5段階・0.2刻み）<span className={styles.required}>*</span></label>
-                <div className={styles.starRatingContainer}>
-                  <div className={styles.starsWrapper}>
-                    {renderStars(rating)}
-                  </div>
-                  <input
-                    type="range"
-                    min="1.0"
-                    max="5.0"
-                    step="0.2"
-                    className={styles.ratingSlider}
-                    value={rating}
-                    onChange={(e) => setRating(parseFloat(e.target.value))}
-                    disabled={generating}
-                  />
-                  <span className={styles.ratingValue}>{rating.toFixed(1)}</span>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">写真（最大3枚）<span className={styles.required}>*</span></label>
-                <div className={styles.photoUploadGroup}>
-                  {photosBase64.map((base64, index) => (
-                    <div key={index} className={styles.photoPreviewCard}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={base64} alt={`Upload preview ${index + 1}`} className={styles.photoPreviewMini} />
-                      <button
-                        type="button"
-                        className={styles.removePhotoBtn}
-                        onClick={() => handleRemovePhoto(index)}
-                        disabled={generating}
-                        title="画像を削除"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
-                  
-                  {photosBase64.length < 3 && (
-                    <div className={styles.photoUploadArea}>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        ref={fileInputRef}
-                        className={styles.fileInput}
-                        onChange={handlePhotoChange}
-                        id="photo-upload-input"
-                        disabled={generating}
-                      />
-                      <label htmlFor="photo-upload-input" className={styles.photoUploadLabel}>
-                        <div className={styles.photoUploadPlaceholder}>
-                          <Camera size={26} className={styles.uploadIcon} />
-                          <span className={styles.uploadText}>写真を追加 ({photosBase64.length}/3)</span>
-                        </div>
-                      </label>
-                    </div>
-                  )}
-                </div>
-
-                {photosBase64.length > 0 && (
-                  <>
-                    <button
-                      type="button"
-                      className={`btn btn-secondary ${styles.identifyBtn}`}
-                      onClick={handleIdentifyShop}
-                      disabled={generating || identifying}
-                    >
-                      {identifying ? (
-                        <>
-                          <Loader2 className={styles.spinner} size={16} />
-                          <span>写真を解析中...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Wand2 size={16} />
-                          <span>写真からお店の名前・場所を推定</span>
-                        </>
-                      )}
-                    </button>
-                    {identifyNote && (
-                      <p className={styles.identifyNote}>{identifyNote}</p>
-                    )}
-                  </>
-                )}
-              </div>
-
-              <div className="form-group">
                 <label className="form-label">場所</label>
                 <input
                   type="text"
@@ -1505,9 +1504,37 @@ export default function DashboardPage() {
                 />
               </div>
 
+              {/* ステップ2: 評価 */}
+              <div className="form-group">
+                <div className={styles.stepTitle}>
+                  <span className={styles.stepNum}>2</span>
+                  <span>評価（5段階・0.2刻み）<span className={styles.required}>*</span></span>
+                </div>
+                <div className={styles.starRatingContainer}>
+                  <div className={styles.starsWrapper}>
+                    {renderStars(rating)}
+                  </div>
+                  <input
+                    type="range"
+                    min="1.0"
+                    max="5.0"
+                    step="0.2"
+                    className={styles.ratingSlider}
+                    value={rating}
+                    onChange={(e) => setRating(parseFloat(e.target.value))}
+                    disabled={generating}
+                  />
+                  <span className={styles.ratingValue}>{rating.toFixed(1)}</span>
+                </div>
+              </div>
+
+              {/* ステップ3: 体験メモ */}
               <div className="form-group">
                 <div className={styles.memoLabelRow}>
-                  <label className="form-label">体験メモ（任意・事実ベース）</label>
+                  <div className={styles.stepTitle}>
+                    <span className={styles.stepNum}>3</span>
+                    <span>体験メモ（任意・事実ベース）</span>
+                  </div>
                   {speechSupported && (
                     <button
                       type="button"
@@ -1561,6 +1588,8 @@ export default function DashboardPage() {
 
         {/* Right Side: Draft list */}
         <section className={styles.listSection}>
+          {/* タブ＋検索はスクロールしても上部に残す */}
+          <div className={styles.listStickyHead}>
           <div className={styles.listTabs}>
             <button
               onClick={() => setFilterTab('all')}
@@ -1605,6 +1634,7 @@ export default function DashboardPage() {
               <option value="rating_desc">評価が高い順</option>
               <option value="rating_asc">評価が低い順</option>
             </select>
+          </div>
           </div>
 
           <div className={styles.reviewList}>
@@ -2279,7 +2309,7 @@ export default function DashboardPage() {
                                         const opened = window.open(url, '_blank', 'noopener,noreferrer');
                                         if (!opened) window.location.assign(url); // ポップアップブロック時は同タブで開く
                                       } catch {
-                                        alert('コメントのコピーに失敗しました。コメント欄の「コピー」ボタンでコピーしてから、もう一度お試しください。');
+                                        showToast('コメントのコピーに失敗しました。コメント欄の「コピー」ボタンでお試しください。');
                                       }
                                       return;
                                     }
@@ -2293,7 +2323,7 @@ export default function DashboardPage() {
                                       } catch { /* 下のガードで通知 */ }
                                     }
                                     if (!copied) {
-                                      alert('コメントのコピーに失敗しました。コメント欄の「コピー」ボタンでコピーしてから、もう一度お試しください。');
+                                      showToast('コメントのコピーに失敗しました。コメント欄の「コピー」ボタンでお試しください。');
                                       return;
                                     }
                                     setCopiedId(`${review.id}-gpost`);
@@ -2422,6 +2452,16 @@ export default function DashboardPage() {
         </section>
 
       </div>
+
+      {/* 画面内トースト通知 */}
+      {toastMsg && (
+        <div
+          className={`${styles.toast} ${toastMsg.kind === 'error' ? styles.toastError : styles.toastSuccess}`}
+          role="status"
+        >
+          {toastMsg.text}
+        </div>
+      )}
 
       {/* モバイル専用の下部タブバー（一覧⇄作成） */}
       <nav className={styles.bottomNav}>

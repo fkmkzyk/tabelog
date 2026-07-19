@@ -15,7 +15,7 @@
   
   --text-primary: #fafaf9; /* Stone-50 */
   --text-secondary: #d6d3d1; /* Stone-300 */
-  --text-muted: #78716c; /* Stone-500 */
+  --text-muted: #8a8580; /* Stone-500と400の中間（ダーク背景での可読性向上） */
   
   --border-color: rgba(120, 113, 108, 0.2); /* Stone-500 with opacity */
   --border-color-focus: rgba(249, 115, 22, 0.5);
